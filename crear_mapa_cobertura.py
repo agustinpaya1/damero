@@ -8,12 +8,139 @@ from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 import threading
 from datetime import datetime
-import gc  # Para gestión de memoria
+import gc
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 # --- CONFIGURACIÓN ---
 CHESSBOARD_SIZE = (10, 7)  # Esquinas interiores del damero
 IMAGE_RESOLUTION = (4096, 3000)
 # --- FIN CONFIGURACIÓN ---
+
+class HeatmapViewer(tk.Toplevel):
+    def __init__(self, parent, initial_heatmap, masks, camera_name, output_path, image_resolution, show_plots=True):
+        super().__init__(parent)
+        self.title(f"Mapa de Calor Interactivo - {camera_name}")
+        self.geometry("1200x800")
+        
+        self.initial_heatmap = initial_heatmap
+        self.masks = masks
+        self.camera_name = camera_name
+        self.output_path = output_path
+        self.image_resolution = image_resolution
+        self.show_plots = show_plots
+        
+        # Estado de selección
+        self.selected = [True] * len(masks)
+        self.current_heatmap = np.copy(initial_heatmap)
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        # Frame principal
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Panel de la imagen
+        img_frame = ttk.Frame(main_frame)
+        img_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Figura de matplotlib
+        self.fig = Figure(figsize=(8, 6))
+        self.ax = self.fig.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=img_frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Actualizar imagen inicial
+        self.update_heatmap_display()
+        
+        # Panel lateral
+        side_frame = ttk.Frame(main_frame, width=300)
+        side_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10,0))
+        
+        # Título
+        ttk.Label(side_frame, text="Imágenes Procesadas", font=('Arial', 12, 'bold')).pack(pady=(0,10))
+        
+        # Frame para la lista de checkboxes con scrollbar
+        list_container = ttk.Frame(side_frame)
+        list_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(list_container)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Canvas para las checkboxes
+        self.checkbox_canvas = tk.Canvas(list_container, yscrollcommand=scrollbar.set)
+        self.checkbox_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.checkbox_canvas.yview)
+        
+        # Frame dentro del canvas para las checkboxes
+        self.checkbox_frame = ttk.Frame(self.checkbox_canvas)
+        self.checkbox_canvas_window = self.checkbox_canvas.create_window((0,0), window=self.checkbox_frame, anchor=tk.NW)
+        
+        # Botones
+        btn_frame = ttk.Frame(side_frame)
+        btn_frame.pack(fill=tk.X, pady=(10,0))
+        
+        save_btn = ttk.Button(btn_frame, text="Guardar Mapa", command=self.save_heatmap)
+        save_btn.pack(side=tk.LEFT, padx=(0,5))
+        
+        close_btn = ttk.Button(btn_frame, text="Cerrar", command=self.destroy)
+        close_btn.pack(side=tk.RIGHT)
+        
+        # Configurar eventos
+        self.checkbox_frame.bind("<Configure>", self.on_frame_configure)
+        self.checkbox_canvas.bind("<Configure>", self.on_canvas_configure)
+        
+        # Crear checkboxes
+        self.checkboxes = []
+        for i, (filename, _) in enumerate(self.masks):
+            var = tk.BooleanVar(value=True)
+            chk = ttk.Checkbutton(
+                self.checkbox_frame, 
+                text=os.path.basename(filename), 
+                variable=var,
+                command=lambda idx=i: self.on_checkbox_change(idx)
+            )
+            chk.pack(anchor=tk.W, padx=5, pady=2)
+            self.checkboxes.append(var)
+            
+    def on_frame_configure(self, event):
+        self.checkbox_canvas.configure(scrollregion=self.checkbox_canvas.bbox("all"))
+        
+    def on_canvas_configure(self, event):
+        canvas_width = event.width
+        self.checkbox_canvas.itemconfig(self.checkbox_canvas_window, width=canvas_width)
+            
+    def on_checkbox_change(self, index):
+        self.selected[index] = self.checkboxes[index].get()
+        self.update_heatmap()
+        
+    def update_heatmap(self):
+        self.current_heatmap = np.zeros(self.initial_heatmap.shape, dtype=np.float32)
+        for i, selected in enumerate(self.selected):
+            if selected:
+                _, mask = self.masks[i]
+                self.current_heatmap += mask
+        self.update_heatmap_display()
+        
+    def update_heatmap_display(self):
+        heatmap_normalized = cv2.normalize(self.current_heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
+        img_rgb = cv2.cvtColor(color_map, cv2.COLOR_BGR2RGB)
+        
+        self.ax.clear()
+        self.ax.imshow(img_rgb)
+        self.ax.set_title(f"Mapa de Calor - {self.camera_name}\n{np.count_nonzero(self.selected)}/{len(self.masks)} imágenes seleccionadas")
+        self.ax.axis('off')
+        self.fig.tight_layout()
+        self.canvas.draw()
+        
+    def save_heatmap(self):
+        heatmap_normalized = cv2.normalize(self.current_heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
+        cv2.imwrite(self.output_path, color_map)
+        messagebox.showinfo("Guardado", f"Mapa de calor guardado en:\n{self.output_path}")
 
 class HeatmapApp:
     def __init__(self, root):
@@ -380,13 +507,20 @@ class HeatmapApp:
         
         output_path = os.path.join(os.path.dirname(folder), f"mapa_calor_{os.path.basename(folder)}.png")
         
-        success = self.crear_mapa_de_cobertura(
+        success, heatmap, masks, processed_count, total_files = self.crear_mapa_de_cobertura(
             folder, chess_size, img_resolution, output_path, "Cámara única"
         )
         
         if success:
+            # Guardar el mapa inicial
+            heatmap_normalized = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
+            cv2.imwrite(output_path, color_map)
+            
+            # Abrir visor interactivo
+            self.open_heatmap_viewer(heatmap, masks, "Cámara única", output_path, img_resolution)
+            
             self.log_message(f"✅ Mapa de calor generado: {output_path}")
-            messagebox.showinfo("Éxito", f"Mapa de calor generado exitosamente:\n{output_path}")
         else:
             self.log_message("❌ No se pudo procesar ninguna imagen válida")
             messagebox.showwarning("Advertencia", "No se pudo procesar ninguna imagen válida")
@@ -420,11 +554,19 @@ class HeatmapApp:
             # Generar nombre de archivo de salida
             output_path = os.path.join(folder, f"mapa_calor_{camera_name}.png")
             
-            success = self.crear_mapa_de_cobertura(
+            success, heatmap, masks, processed_count, total_files = self.crear_mapa_de_cobertura(
                 camera_path, chess_size, img_resolution, output_path, camera_name
             )
             
             if success:
+                # Guardar el mapa inicial
+                heatmap_normalized = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
+                cv2.imwrite(output_path, color_map)
+                
+                # Abrir visor interactivo
+                self.open_heatmap_viewer(heatmap, masks, camera_name, output_path, img_resolution)
+                
                 successful_cameras += 1
                 self.log_message(f"✅ {camera_name}: Completado")
             else:
@@ -446,13 +588,14 @@ class HeatmapApp:
     
     def crear_mapa_de_cobertura(self, images_path, chessboard_size, image_resolution, output_path, camera_name):
         heatmap = np.zeros((image_resolution[1], image_resolution[0]), dtype=np.float32)
+        masks = []  # Lista para guardar tuplas (filename, mask)
         
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
         
         image_files = self.find_images_in_folder(images_path)
         
         if not image_files:
-            return False
+            return False, None, [], 0, 0
         
         processed_count = 0
         total_files = len(image_files)
@@ -502,9 +645,13 @@ class HeatmapApp:
                     
                     pts = np.array([top_left, top_right, bottom_right, bottom_left], np.int32).reshape((-1, 1, 2))
                     
-                    mask = np.zeros_like(heatmap, dtype=np.uint8)
-                    cv2.fillConvexPoly(mask, pts, 1)
-                    heatmap += mask.astype(np.float32)
+                    # Crear máscara individual
+                    mask = np.zeros((image_resolution[1], image_resolution[0]), dtype=np.float32)
+                    cv2.fillConvexPoly(mask, pts, 1.0)
+                    
+                    # Acumular en el heatmap total
+                    heatmap += mask
+                    masks.append((filename, mask))
                     processed_count += 1
                 
                 # Liberar memoria
@@ -518,38 +665,15 @@ class HeatmapApp:
                 self.root.after(0, lambda p=current_progress: self.progress.config(value=p))
         
         if processed_count == 0:
-            return False
+            return False, None, [], 0, 0
         
-        # Normalizar y colorear
-        heatmap_normalized = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
-        
-        # Guardar imagen si está habilitado
-        if self.save_individual.get():
-            cv2.imwrite(output_path, color_map)
-        
-        # Mostrar gráfico si está habilitado
-        if self.show_plots.get():
-            # Crear figura sin bloquear usando thread-safe updates
-            def show_plot():
-                try:
-                    fig, ax = plt.subplots(figsize=(10, 7))
-                    ax.imshow(cv2.cvtColor(color_map, cv2.COLOR_BGR2RGB))
-                    ax.set_title(f"Mapa de Calor - {camera_name}\n{processed_count}/{total_files} imágenes procesadas")
-                    ax.axis('off')
-                    plt.tight_layout()
-                    
-                    # Mostrar sin bloquear
-                    plt.show(block=False)
-                    plt.pause(0.1)  # Pequeña pausa para asegurar que se renderice
-                    
-                except Exception as e:
-                    self.log_message(f"⚠️ Error mostrando gráfico para {camera_name}: {str(e)}")
-            
-            # Ejecutar en el hilo principal de la GUI
-            self.root.after(0, show_plot)
-        
-        return True
+        return True, heatmap, masks, processed_count, total_files
+    
+    def open_heatmap_viewer(self, heatmap, masks, camera_name, output_path, image_resolution):
+        # Ejecutar en el hilo principal
+        self.root.after(0, lambda: HeatmapViewer(
+            self.root, heatmap, masks, camera_name, output_path, image_resolution, self.show_plots.get()
+        ))
     
     def add_to_history(self, folder):
         if folder in self.folders_history:
