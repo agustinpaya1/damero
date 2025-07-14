@@ -1,171 +1,100 @@
-# Generador de Mapa de Calor Multi-Cámara
+Documentación para la Aplicación de Generación de Mapas de Calor
+Propósito de la Aplicación
+Esta herramienta genera mapas de calor que muestran la cobertura del patrón de damero en imágenes de calibración de cámaras. Ayuda a verificar si las imágenes capturadas cubren adecuadamente el campo de visión antes de realizar el cálculo de distorsión.
 
-Una aplicación GUI para generar mapas de calor de cobertura basados en la detección de tableros de ajedrez en imágenes de calibración de cámaras.
+Instrucciones de Uso
+Selección de Carpeta
 
-## 🎯 Características
+Carpeta Única: Usa cuando todas las imágenes sean de una misma cámara.
 
-- **Procesamiento flexible**: Soporte para una sola cámara o múltiples cámaras
-- **Interfaz intuitiva**: GUI moderna con Tkinter
-- **Procesamiento en tiempo real**: Barra de progreso y logging en vivo
-- **Historial de carpetas**: Recuerda las carpetas utilizadas anteriormente
-- **Optimización de rendimiento**: Procesamiento por lotes y gestión de memoria
-- **Configuración personalizable**: Tamaño de damero y resolución de imagen ajustables
-- **Múltiples formatos**: Soporte para JPG, PNG, BMP, TIFF
+Carpeta con Subcarpetas: Usa cuando tengas imágenes organizadas en subcarpetas por cámara.
 
-## 📋 Requisitos
+Haz clic en "Examinar..." para seleccionar la carpeta con las imágenes.
 
-### Dependencias Python
-```
-opencv-python>=4.5.0
-numpy>=1.19.0
-matplotlib>=3.3.0
-tkinter (incluido con Python)
-pathlib (incluido con Python)
-```
+Configuración
 
-### Requisitos del Sistema
-- Python 3.7 o superior
-- Windows, macOS, o Linux
-- Mínimo 4GB RAM (recomendado 8GB para imágenes grandes)
+Tamaño del Damero: Número de esquinas interiores del patrón (ej: 10x7).
 
-## 🚀 Instalación
+Resolución de Imagen: Resolución nativa de las imágenes (ej: 4096x3000).
 
-### Opción 1: Ejecutable (Recomendado)
-1. Descarga el archivo `heatmap_generator.exe` desde [Releases](../../releases)
-2. Ejecuta directamente - no requiere instalación de Python
+Opciones:
 
-### Opción 2: Desde código fuente
-1. Clona el repositorio:
-```bash
-git clone https://github.com/tu-usuario/heatmap-generator.git
-cd heatmap-generator
-```
+Guardar mapas individuales: Genera un mapa para cada cámara.
 
-2. Instala las dependencias:
-```bash
-pip install -r requirements.txt
-```
+Mostrar gráficos: Muestra los mapas interactivos.
 
-3. Ejecuta la aplicación:
-```bash
-python heatmap_generator.py
-```
+Optimizar rendimiento: Acelera el procesamiento.
 
-## 📖 Uso
+Generación del Mapa
 
-### Configuración Inicial
-1. **Selecciona el modo de procesamiento**:
-   - **Carpeta única**: Para imágenes de una sola cámara
-   - **Múltiples cámaras**: Para carpetas con subcarpetas (una por cámara)
+Haz clic en "Generar Mapa(s) de Calor".
 
-2. **Configura los parámetros**:
-   - **Tamaño del damero**: Número de esquinas interiores (ej: 10x7)
-   - **Resolución de imagen**: Resolución de las imágenes (ej: 4096x3000)
+La barra de progreso mostrará el avance.
 
-### Procesamiento de una Cámara
-1. Selecciona una carpeta que contenga imágenes de calibración
-2. Ajusta la configuración según tu damero
-3. Haz clic en "Generar Mapa de Calor"
-4. El mapa se guardará en la carpeta padre con el nombre `mapa_calor_[nombre_carpeta].png`
+Usa "Cancelar" para detener el procesamiento.
 
-### Procesamiento Multi-Cámara
-1. Selecciona una carpeta que contenga subcarpetas (una por cámara)
-2. Estructura requerida:
-   ```
-   carpeta_principal/
-   ├── camara_1/
-   │   ├── imagen1.jpg
-   │   ├── imagen2.jpg
-   │   └── ...
-   ├── camara_2/
-   │   ├── imagen1.jpg
-   │   └── ...
-   └── ...
-   ```
-3. Se generará un mapa de calor para cada cámara
+Resultados
 
-## 🎨 Interpretación de Resultados
+Mapa de Calor Interactivo:
 
-- **Colores cálidos (rojo/amarillo)**: Áreas con alta cobertura (muchas detecciones)
-- **Colores fríos (azul/verde)**: Áreas con baja cobertura
-- **Negro**: Áreas sin cobertura
+Selecciona/deselecciona imágenes en el panel derecho.
 
-## ⚙️ Opciones Avanzadas
+El mapa se actualiza en tiempo real.
 
-### Optimización de Rendimiento
-- **Procesamiento por lotes**: Procesa imágenes en grupos para mejor rendimiento
-- **Redimensionamiento automático**: Reduce imágenes muy grandes temporalmente
-- **Gestión de memoria**: Libera memoria automáticamente durante el procesamiento
+Guarda el mapa con el botón correspondiente.
 
-### Configuración Personalizable
-- **Guardar mapas individuales**: Deshabilita para solo visualizar
-- **Mostrar gráficos**: Controla si se muestran las ventanas de matplotlib
-- **Optimizar rendimiento**: Activa/desactiva optimizaciones de memoria
+Galería (Modo Múltiple):
 
-## 🔧 Solución de Problemas
+Vista previa de todos los mapas generados.
 
-### Errores Comunes
+Doble clic para abrir un mapa en detalle.
 
-**"No se encontraron imágenes"**
-- Verifica que la carpeta contenga archivos JPG, PNG, BMP o TIFF
-- Asegúrate de que los archivos no estén corruptos
+Requisitos Técnicos
+Formatos de Imagen Soportados: JPG, JPEG, PNG, BMP, TIFF.
 
-**"No se pudo procesar ninguna imagen válida"**
-- Verifica que el tamaño del damero sea correcto
-- Asegúrate de que las imágenes contengan un tablero de ajedrez visible
-- Verifica que la iluminación sea adecuada
+Estructura de Carpetas (Modo Múltiple):
 
-**"Error de memoria"**
-- Activa la opción "Optimizar rendimiento"
-- Procesa menos imágenes por lote
-- Cierra otras aplicaciones que consuman mucha memoria
+text
+Carpeta_Principal/
+  ├── Camara_1/
+  │   ├── img1.jpg
+  │   └── img2.jpg
+  └── Camara_2/
+      ├── img1.jpg
+      └── img2.jpg
+Solución de Problemas Comunes
+Imágenes no detectadas:
 
-### Optimización para Imágenes Grandes
-- La aplicación redimensiona automáticamente imágenes > 2048px
-- Para mejor rendimiento, considera redimensionar las imágenes previamente
-- Usa formatos comprimidos (JPG) en lugar de RAW o TIFF cuando sea posible
+Verifica que estén en la carpeta correcta.
 
-## 🤝 Contribuciones
+Asegúrate de usar formatos compatibles.
 
-Las contribuciones son bienvenidas. Para cambios importantes:
+Procesamiento lento:
 
-1. Abre un issue para discutir los cambios
-2. Haz fork del proyecto
-3. Crea una rama para tu feature (`git checkout -b feature/nueva-funcionalidad`)
-4. Commit tus cambios (`git commit -am 'Añade nueva funcionalidad'`)
-5. Push a la rama (`git push origin feature/nueva-funcionalidad`)
-6. Abre un Pull Request
+Activa "Optimizar rendimiento".
 
-## 📝 Changelog
+Reduce la resolución si las imágenes son muy grandes.
 
-### v1.0.0
-- Lanzamiento inicial
-- Soporte para procesamiento único y multi-cámara
-- Interfaz gráfica completa
-- Optimizaciones de rendimiento
-- Historial de carpetas
+Mapa vacío:
 
-## 📄 Licencia
+Revisa el tamaño del damero.
 
-Este proyecto está bajo la Licencia MIT. Ver el archivo [LICENSE](LICENSE) para más detalles.
+Asegúrate de que las imágenes contengan el patrón completo.
 
-## 👥 Autores
+Salida
+Los mapas se guardan como archivos PNG en la carpeta de origen con el nombre mapa_calor_[nombre_cámara].png.
 
-- Tu Nombre - agustinpaya1 (https://github.com/agustinpaya1)
+El mapa de calor usa una escala de colores:
 
-## 🙏 Agradecimientos
+Azul: Zonas con poca cobertura.
 
-- OpenCV team por la excelente librería de visión computacional
-- Matplotlib por las herramientas de visualización
-- Comunidad de Python por el ecosistema de librerías
+Rojo: Zonas con alta cobertura.
 
-## 📞 Soporte
+Notas Importantes
+El historial de carpetas se guarda automáticamente.
 
-Si tienes problemas o preguntas:
-- Abre un [issue](../../issues) en GitHub
-- Consulta la [documentación](../../wiki)
-- Contacta al desarrollador
+Usa "Limpiar Historial" para borrar carpetas anteriores.
 
----
+La aplicación no modifica las imágenes originales.
 
-⭐ Si este proyecto te ha sido útil, considera darle una estrella en GitHub!
+Esta documentación permite a los usuarios utilizar la herramienta sin necesidad de acceder al código fuente.
