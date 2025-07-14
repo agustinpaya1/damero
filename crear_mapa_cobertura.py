@@ -3,83 +3,590 @@ import numpy as np
 import os
 import glob
 import matplotlib.pyplot as plt
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+from pathlib import Path
+import threading
+from datetime import datetime
+import gc  # Para gestión de memoria
 
 # --- CONFIGURACIÓN ---
 CHESSBOARD_SIZE = (10, 7)  # Esquinas interiores del damero
-IMAGES_PATH = './fotos_calibracion'
-OUTPUT_IMAGE_PATH = './mapa_cobertura.png'
 IMAGE_RESOLUTION = (4096, 3000)
 # --- FIN CONFIGURACIÓN ---
 
-def procesar_imagen(filename, chessboard_size, image_resolution, criteria):
-    """
-    Procesa una única imagen para encontrar el damero y devuelve una máscara de su área.
-    Esta función está diseñada para ser ejecutada en un proceso separado.
-    """
-    img = cv2.imread(filename)
-    if img is None:
-        print(f"  - Advertencia: No se pudo leer la imagen: {os.path.basename(filename)}")
-        return None, filename
-
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
-    ret, corners = cv2.findChessboardCorners(gray, chessboard_size, flags=flags)
-
-    if not ret:
-        return None, filename
-
-    corners_subpix = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-
-    # Usar convexHull es más robusto que seleccionar las 4 esquinas manualmente
-    hull = cv2.convexHull(corners_subpix)
-    mask = np.zeros((image_resolution[1], image_resolution[0]), dtype=np.uint8)
-    cv2.fillConvexPoly(mask, np.int32(hull), 1)
-
-    return mask.astype(np.float32), filename
-
-def crear_mapa_de_cobertura():
-    heatmap = np.zeros((IMAGE_RESOLUTION[1], IMAGE_RESOLUTION[0]), dtype=np.float32)
-    
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-
-    image_files = glob.glob(os.path.join(IMAGES_PATH, '*.jpg')) + \
-                  glob.glob(os.path.join(IMAGES_PATH, '*.png')) + \
-                  glob.glob(os.path.join(IMAGES_PATH, '*.bmp'))
-
-    if not image_files:
-        print(f"Error: No se encontraron imágenes en la carpeta '{IMAGES_PATH}'.")
-        return
-
-    print(f"Procesando {len(image_files)} imágenes...")
-
-    # Usamos un ProcessPoolExecutor para procesar las imágenes en paralelo
-    with ProcessPoolExecutor() as executor:
-        # Enviamos todos los trabajos a la piscina de procesos
-        futures = [executor.submit(procesar_imagen, f, CHESSBOARD_SIZE, IMAGE_RESOLUTION, criteria) for f in image_files]
+class HeatmapApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Generador de Mapa de Calor - Calibración Multi-Cámara")
+        self.root.geometry("800x600")
         
-        # A medida que cada trabajo termina, procesamos su resultado
-        for future in as_completed(futures):
-            mask, filename = future.result()
-            if mask is not None:
-                heatmap += mask
-                print(f"  - Damero encontrado en: {os.path.basename(filename)}")
+        # Variables
+        self.selected_folder = tk.StringVar()
+        self.folders_history = []
+        self.processing_mode = tk.StringVar(value="single")
+        self.camera_folders = []
+        
+        # Cargar historial de carpetas
+        self.load_folder_history()
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        # Frame principal
+        main_frame = ttk.Frame(self.root, padding="20")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Título
+        title_label = ttk.Label(main_frame, text="Generador de Mapa de Calor Multi-Cámara", 
+                               font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        
+        # Modo de procesamiento
+        mode_frame = ttk.LabelFrame(main_frame, text="Modo de Procesamiento", padding="10")
+        mode_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20))
+        
+        ttk.Radiobutton(mode_frame, text="Carpeta única (una cámara)", 
+                       variable=self.processing_mode, value="single",
+                       command=self.on_mode_change).grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
+        
+        ttk.Radiobutton(mode_frame, text="Carpeta con subcarpetas (múltiples cámaras)", 
+                       variable=self.processing_mode, value="multi",
+                       command=self.on_mode_change).grid(row=0, column=1, sticky=tk.W)
+        
+        # Selección de carpeta
+        folder_frame = ttk.LabelFrame(main_frame, text="Seleccionar Carpeta", padding="10")
+        folder_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20))
+        
+        # Combobox para carpetas recientes
+        ttk.Label(folder_frame, text="Carpeta:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        
+        self.folder_combobox = ttk.Combobox(folder_frame, textvariable=self.selected_folder, 
+                                           values=self.folders_history, width=70)
+        self.folder_combobox.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
+        
+        # Botón examinar
+        browse_btn = ttk.Button(folder_frame, text="Examinar...", 
+                               command=self.browse_folder)
+        browse_btn.grid(row=1, column=1, padx=(0, 10))
+        
+        # Botón actualizar lista
+        refresh_btn = ttk.Button(folder_frame, text="↻", width=3,
+                                command=self.refresh_folder_info)
+        refresh_btn.grid(row=1, column=2)
+        
+        # Información de la carpeta
+        info_frame = ttk.Frame(folder_frame)
+        info_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
+        
+        self.info_text = tk.Text(info_frame, height=8, width=80, wrap=tk.WORD)
+        self.info_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Scrollbar para el texto
+        scrollbar = ttk.Scrollbar(info_frame, orient=tk.VERTICAL, command=self.info_text.yview)
+        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.info_text.config(yscrollcommand=scrollbar.set)
+        
+        info_frame.columnconfigure(0, weight=1)
+        info_frame.rowconfigure(0, weight=1)
+        
+        # Configuración
+        config_frame = ttk.LabelFrame(main_frame, text="Configuración", padding="10")
+        config_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20))
+        
+        # Tamaño del damero
+        ttk.Label(config_frame, text="Tamaño del damero (esquinas interiores):").grid(row=0, column=0, sticky=tk.W)
+        
+        chess_frame = ttk.Frame(config_frame)
+        chess_frame.grid(row=0, column=1, sticky=tk.W, padx=(10, 0))
+        
+        self.chess_width = tk.StringVar(value=str(CHESSBOARD_SIZE[0]))
+        self.chess_height = tk.StringVar(value=str(CHESSBOARD_SIZE[1]))
+        
+        ttk.Entry(chess_frame, textvariable=self.chess_width, width=5).grid(row=0, column=0)
+        ttk.Label(chess_frame, text="x").grid(row=0, column=1, padx=5)
+        ttk.Entry(chess_frame, textvariable=self.chess_height, width=5).grid(row=0, column=2)
+        
+        # Resolución de imagen
+        ttk.Label(config_frame, text="Resolución de imagen:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
+        
+        res_frame = ttk.Frame(config_frame)
+        res_frame.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(10, 0))
+        
+        self.img_width = tk.StringVar(value=str(IMAGE_RESOLUTION[0]))
+        self.img_height = tk.StringVar(value=str(IMAGE_RESOLUTION[1]))
+        
+        ttk.Entry(res_frame, textvariable=self.img_width, width=6).grid(row=0, column=0)
+        ttk.Label(res_frame, text="x").grid(row=0, column=1, padx=5)
+        ttk.Entry(res_frame, textvariable=self.img_height, width=6).grid(row=0, column=2)
+        
+        # Opciones adicionales
+        options_frame = ttk.Frame(config_frame)
+        options_frame.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        
+        self.save_individual = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="Guardar mapas individuales", 
+                       variable=self.save_individual).grid(row=0, column=0, sticky=tk.W)
+        
+        self.show_plots = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="Mostrar gráficos", 
+                       variable=self.show_plots).grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
+        
+        self.optimize_performance = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="Optimizar rendimiento", 
+                       variable=self.optimize_performance).grid(row=1, column=0, sticky=tk.W, pady=(5, 0))
+        
+        # Botones de acción
+        action_frame = ttk.Frame(main_frame)
+        action_frame.grid(row=4, column=0, columnspan=3, pady=(0, 20))
+        
+        self.generate_btn = ttk.Button(action_frame, text="Generar Mapa(s) de Calor", 
+                                      command=self.generate_heatmap_threaded, 
+                                      style="Accent.TButton")
+        self.generate_btn.grid(row=0, column=0, padx=(0, 10))
+        
+        clear_btn = ttk.Button(action_frame, text="Limpiar Historial", 
+                              command=self.clear_history)
+        clear_btn.grid(row=0, column=1, padx=(0, 10))
+        
+        self.cancel_btn = ttk.Button(action_frame, text="Cancelar", 
+                                    command=self.cancel_processing, state='disabled')
+        self.cancel_btn.grid(row=0, column=2)
+        
+        # Barra de progreso
+        progress_frame = ttk.Frame(main_frame)
+        progress_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        self.progress = ttk.Progressbar(progress_frame, mode='determinate')
+        self.progress.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
+        
+        self.progress_label = ttk.Label(progress_frame, text="")
+        self.progress_label.grid(row=0, column=1)
+        
+        progress_frame.columnconfigure(0, weight=1)
+        
+        # Log de procesamiento
+        log_frame = ttk.LabelFrame(main_frame, text="Log de Procesamiento", padding="10")
+        log_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        
+        log_text_frame = ttk.Frame(log_frame)
+        log_text_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        self.log_text = tk.Text(log_text_frame, height=6, width=80, wrap=tk.WORD)
+        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        log_scrollbar = ttk.Scrollbar(log_text_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        log_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.log_text.config(yscrollcommand=log_scrollbar.set)
+        
+        log_text_frame.columnconfigure(0, weight=1)
+        log_text_frame.rowconfigure(0, weight=1)
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        
+        # Configurar columnas para que se expandan
+        main_frame.columnconfigure(0, weight=1)
+        folder_frame.columnconfigure(0, weight=1)
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.rowconfigure(6, weight=1)
+        
+        # Variables de control
+        self.cancel_processing_flag = False
+        self.processing_thread = None
+        
+        # Bind eventos
+        self.folder_combobox.bind('<<ComboboxSelected>>', self.on_folder_selected)
+        self.folder_combobox.bind('<Return>', self.on_folder_selected)
+        
+        # Actualizar información inicial
+        if self.folders_history:
+            self.selected_folder.set(self.folders_history[0])
+            self.refresh_folder_info()
+        
+        self.on_mode_change()
+    
+    def on_mode_change(self):
+        self.refresh_folder_info()
+    
+    def browse_folder(self):
+        folder = filedialog.askdirectory(title="Seleccionar carpeta")
+        if folder:
+            self.selected_folder.set(folder)
+            self.add_to_history(folder)
+            self.refresh_folder_info()
+    
+    def on_folder_selected(self, event=None):
+        self.refresh_folder_info()
+    
+    def refresh_folder_info(self):
+        folder = self.selected_folder.get()
+        if not folder or not os.path.exists(folder):
+            self.info_text.delete(1.0, tk.END)
+            self.info_text.insert(tk.END, "Selecciona una carpeta válida...")
+            self.generate_btn.config(state='disabled')
+            return
+        
+        self.info_text.delete(1.0, tk.END)
+        mode = self.processing_mode.get()
+        
+        if mode == "single":
+            self.process_single_folder_info(folder)
+        else:
+            self.process_multi_folder_info(folder)
+    
+    def process_single_folder_info(self, folder):
+        # Buscar imágenes en la carpeta
+        image_files = self.find_images_in_folder(folder)
+        
+        self.info_text.insert(tk.END, f"📁 Modo: Carpeta única\n")
+        self.info_text.insert(tk.END, f"📂 Carpeta: {folder}\n")
+        
+        if not image_files:
+            self.info_text.insert(tk.END, f"❌ No se encontraron imágenes\n")
+            self.generate_btn.config(state='disabled')
+        else:
+            self.info_text.insert(tk.END, f"📸 Imágenes encontradas: {len(image_files)}\n\n")
+            
+            # Mostrar algunas imágenes de ejemplo
+            sample_files = image_files[:5]
+            self.info_text.insert(tk.END, "Ejemplos de archivos:\n")
+            for i, file in enumerate(sample_files):
+                self.info_text.insert(tk.END, f"  • {os.path.basename(file)}\n")
+            
+            if len(image_files) > 5:
+                self.info_text.insert(tk.END, f"  ... y {len(image_files) - 5} más\n")
+            
+            self.generate_btn.config(state='normal')
+    
+    def process_multi_folder_info(self, folder):
+        # Buscar subcarpetas
+        subfolders = [f for f in os.listdir(folder) 
+                     if os.path.isdir(os.path.join(folder, f)) and not f.startswith('.')]
+        
+        self.info_text.insert(tk.END, f"📁 Modo: Múltiples cámaras\n")
+        self.info_text.insert(tk.END, f"📂 Carpeta principal: {folder}\n")
+        
+        if not subfolders:
+            self.info_text.insert(tk.END, f"❌ No se encontraron subcarpetas\n")
+            self.generate_btn.config(state='disabled')
+            return
+        
+        self.camera_folders = []
+        total_images = 0
+        
+        self.info_text.insert(tk.END, f"📷 Subcarpetas encontradas: {len(subfolders)}\n\n")
+        
+        for subfolder in sorted(subfolders):
+            subfolder_path = os.path.join(folder, subfolder)
+            image_files = self.find_images_in_folder(subfolder_path)
+            
+            if image_files:
+                self.camera_folders.append({
+                    'name': subfolder,
+                    'path': subfolder_path,
+                    'images': image_files
+                })
+                total_images += len(image_files)
+                
+                self.info_text.insert(tk.END, f"📷 {subfolder}:\n")
+                self.info_text.insert(tk.END, f"  └── {len(image_files)} imágenes\n")
             else:
-                print(f"  - No se pudo encontrar el damero en: {os.path.basename(filename)}")
+                self.info_text.insert(tk.END, f"⚠️ {subfolder}:\n")
+                self.info_text.insert(tk.END, f"  └── Sin imágenes válidas\n")
+        
+        if self.camera_folders:
+            self.info_text.insert(tk.END, f"\n📊 Total: {len(self.camera_folders)} cámaras, {total_images} imágenes\n")
+            self.generate_btn.config(state='normal')
+        else:
+            self.info_text.insert(tk.END, f"\n❌ No se encontraron carpetas con imágenes válidas\n")
+            self.generate_btn.config(state='disabled')
+    
+    def find_images_in_folder(self, folder):
+        image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']
+        image_files = []
+        for ext in image_extensions:
+            image_files.extend(glob.glob(os.path.join(folder, ext)))
+            image_files.extend(glob.glob(os.path.join(folder, ext.upper())))
+        return image_files
+    
+    def log_message(self, message):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        self.log_text.see(tk.END)
+        self.root.update_idletasks()
+    
+    def generate_heatmap_threaded(self):
+        """Ejecuta el procesamiento en un hilo separado"""
+        self.cancel_processing_flag = False
+        self.processing_thread = threading.Thread(target=self.generate_heatmap)
+        self.processing_thread.daemon = True
+        self.processing_thread.start()
+    
+    def cancel_processing(self):
+        """Cancela el procesamiento"""
+        self.cancel_processing_flag = True
+        self.log_message("🛑 Cancelando procesamiento...")
+    
+    def generate_heatmap(self):
+        folder = self.selected_folder.get()
+        if not folder or not os.path.exists(folder):
+            messagebox.showerror("Error", "Selecciona una carpeta válida")
+            return
+        
+        try:
+            # Obtener configuración
+            chess_size = (int(self.chess_width.get()), int(self.chess_height.get()))
+            img_resolution = (int(self.img_width.get()), int(self.img_height.get()))
+            
+            # Validar configuración
+            if chess_size[0] <= 0 or chess_size[1] <= 0:
+                raise ValueError("El tamaño del damero debe ser positivo")
+            if img_resolution[0] <= 0 or img_resolution[1] <= 0:
+                raise ValueError("La resolución de imagen debe ser positiva")
+                
+        except ValueError as e:
+            messagebox.showerror("Error de configuración", f"Configuración inválida: {str(e)}")
+            return
+        
+        # Actualizar historial
+        self.add_to_history(folder)
+        
+        # Configurar UI para procesamiento
+        self.generate_btn.config(state='disabled')
+        self.cancel_btn.config(state='normal')
+        self.log_text.delete(1.0, tk.END)
+        
+        try:
+            mode = self.processing_mode.get()
+            
+            if mode == "single":
+                self.process_single_camera(folder, chess_size, img_resolution)
+            else:
+                self.process_multiple_cameras(folder, chess_size, img_resolution)
+                
+        except Exception as e:
+            self.log_message(f"❌ Error: {str(e)}")
+            messagebox.showerror("Error", f"Error al generar el mapa de calor:\n{str(e)}")
+        
+        finally:
+            self.generate_btn.config(state='normal')
+            self.cancel_btn.config(state='disabled')
+            self.progress.config(value=0)
+            self.progress_label.config(text="")
+    
+    def process_single_camera(self, folder, chess_size, img_resolution):
+        self.log_message("🎯 Procesando cámara única...")
+        
+        output_path = os.path.join(os.path.dirname(folder), f"mapa_calor_{os.path.basename(folder)}.png")
+        
+        success = self.crear_mapa_de_cobertura(
+            folder, chess_size, img_resolution, output_path, "Cámara única"
+        )
+        
+        if success:
+            self.log_message(f"✅ Mapa de calor generado: {output_path}")
+            messagebox.showinfo("Éxito", f"Mapa de calor generado exitosamente:\n{output_path}")
+        else:
+            self.log_message("❌ No se pudo procesar ninguna imagen válida")
+            messagebox.showwarning("Advertencia", "No se pudo procesar ninguna imagen válida")
+    
+    def process_multiple_cameras(self, folder, chess_size, img_resolution):
+        if not self.camera_folders:
+            self.log_message("❌ No hay carpetas de cámaras para procesar")
+            return
+        
+        self.log_message(f"🎯 Procesando {len(self.camera_folders)} cámaras...")
+        
+        total_cameras = len(self.camera_folders)
+        successful_cameras = 0
+        
+        for i, camera_info in enumerate(self.camera_folders):
+            if self.cancel_processing_flag:
+                self.log_message("🛑 Procesamiento cancelado por el usuario")
+                break
+                
+            camera_name = camera_info['name']
+            camera_path = camera_info['path']
+            
+            # Actualizar progreso
+            progress = (i / total_cameras) * 100
+            self.progress.config(value=progress)
+            self.progress_label.config(text=f"Procesando {camera_name}...")
+            self.root.update_idletasks()
+            
+            self.log_message(f"📷 Procesando cámara: {camera_name}")
+            
+            # Generar nombre de archivo de salida
+            output_path = os.path.join(folder, f"mapa_calor_{camera_name}.png")
+            
+            success = self.crear_mapa_de_cobertura(
+                camera_path, chess_size, img_resolution, output_path, camera_name
+            )
+            
+            if success:
+                successful_cameras += 1
+                self.log_message(f"✅ {camera_name}: Completado")
+            else:
+                self.log_message(f"❌ {camera_name}: Sin imágenes válidas")
+        
+        # Progreso final
+        self.progress.config(value=100)
+        self.progress_label.config(text="Completado")
+        
+        if successful_cameras > 0:
+            self.log_message(f"🎉 Procesamiento completado: {successful_cameras}/{total_cameras} cámaras")
+            messagebox.showinfo("Éxito", 
+                f"Procesamiento completado exitosamente:\n"
+                f"• {successful_cameras} de {total_cameras} cámaras procesadas\n"
+                f"• Mapas guardados en: {folder}")
+        else:
+            self.log_message("❌ No se pudo procesar ninguna cámara")
+            messagebox.showwarning("Advertencia", "No se pudo procesar ninguna cámara")
+    
+    def crear_mapa_de_cobertura(self, images_path, chessboard_size, image_resolution, output_path, camera_name):
+        heatmap = np.zeros((image_resolution[1], image_resolution[0]), dtype=np.float32)
+        
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        
+        image_files = self.find_images_in_folder(images_path)
+        
+        if not image_files:
+            return False
+        
+        processed_count = 0
+        total_files = len(image_files)
+        
+        # Optimización: procesar en lotes para mejor rendimiento
+        batch_size = 10
+        
+        for i in range(0, len(image_files), batch_size):
+            if self.cancel_processing_flag:
+                break
+                
+            # Procesar lote
+            batch_files = image_files[i:i + batch_size]
+            
+            for filename in batch_files:
+                if self.cancel_processing_flag:
+                    break
+                    
+                img = cv2.imread(filename)
+                if img is None:
+                    continue
+                
+                # Redimensionar imagen si es muy grande para mejorar rendimiento
+                height, width = img.shape[:2]
+                if width > 2048 or height > 2048:
+                    scale = min(2048/width, 2048/height)
+                    new_width = int(width * scale)
+                    new_height = int(height * scale)
+                    img = cv2.resize(img, (new_width, new_height))
+                
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
+                ret, corners = cv2.findChessboardCorners(gray, chessboard_size, flags=flags)
+                
+                if ret:
+                    corners_subpix = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+                    
+                    # Escalar coordenadas de vuelta si redimensionamos
+                    if width > 2048 or height > 2048:
+                        scale_back = max(width/2048, height/2048)
+                        corners_subpix = corners_subpix * scale_back
+                    
+                    top_left = corners_subpix[0][0]
+                    top_right = corners_subpix[chessboard_size[0] - 1][0]
+                    bottom_right = corners_subpix[-1][0]
+                    bottom_left = corners_subpix[-chessboard_size[0]][0]
+                    
+                    pts = np.array([top_left, top_right, bottom_right, bottom_left], np.int32).reshape((-1, 1, 2))
+                    
+                    mask = np.zeros_like(heatmap, dtype=np.uint8)
+                    cv2.fillConvexPoly(mask, pts, 1)
+                    heatmap += mask.astype(np.float32)
+                    processed_count += 1
+                
+                # Liberar memoria
+                del img, gray
+                if self.optimize_performance.get():
+                    gc.collect()  # Forzar garbage collection periódicamente
+            
+            # Actualizar progreso cada lote
+            if hasattr(self, 'progress') and total_files > 0:
+                current_progress = min(100, (i + batch_size) / total_files * 100)
+                self.root.after(0, lambda p=current_progress: self.progress.config(value=p))
+        
+        if processed_count == 0:
+            return False
+        
+        # Normalizar y colorear
+        heatmap_normalized = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
+        
+        # Guardar imagen si está habilitado
+        if self.save_individual.get():
+            cv2.imwrite(output_path, color_map)
+        
+        # Mostrar gráfico si está habilitado
+        if self.show_plots.get():
+            # Crear figura sin bloquear usando thread-safe updates
+            def show_plot():
+                try:
+                    fig, ax = plt.subplots(figsize=(10, 7))
+                    ax.imshow(cv2.cvtColor(color_map, cv2.COLOR_BGR2RGB))
+                    ax.set_title(f"Mapa de Calor - {camera_name}\n{processed_count}/{total_files} imágenes procesadas")
+                    ax.axis('off')
+                    plt.tight_layout()
+                    
+                    # Mostrar sin bloquear
+                    plt.show(block=False)
+                    plt.pause(0.1)  # Pequeña pausa para asegurar que se renderice
+                    
+                except Exception as e:
+                    self.log_message(f"⚠️ Error mostrando gráfico para {camera_name}: {str(e)}")
+            
+            # Ejecutar en el hilo principal de la GUI
+            self.root.after(0, show_plot)
+        
+        return True
+    
+    def add_to_history(self, folder):
+        if folder in self.folders_history:
+            self.folders_history.remove(folder)
+        self.folders_history.insert(0, folder)
+        self.folders_history = self.folders_history[:10]  # Mantener solo los últimos 10
+        self.folder_combobox.config(values=self.folders_history)
+        self.save_folder_history()
+    
+    def load_folder_history(self):
+        try:
+            history_file = Path.home() / '.heatmap_folders.txt'
+            if history_file.exists():
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    self.folders_history = [line.strip() for line in f.readlines() if line.strip()]
+        except:
+            self.folders_history = []
+    
+    def save_folder_history(self):
+        try:
+            history_file = Path.home() / '.heatmap_folders.txt'
+            with open(history_file, 'w', encoding='utf-8') as f:
+                for folder in self.folders_history:
+                    f.write(folder + '\n')
+        except:
+            pass
+    
+    def clear_history(self):
+        if messagebox.askyesno("Confirmar", "¿Limpiar el historial de carpetas?"):
+            self.folders_history = []
+            self.folder_combobox.config(values=[])
+            self.save_folder_history()
 
-    # Normalizar y colorear el mapa de calor final
-    heatmap_normalized = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
-    cv2.imwrite(OUTPUT_IMAGE_PATH, color_map)
-    print(f"\n✅ Mapa de calor guardado en: {OUTPUT_IMAGE_PATH}")
-
-    # Mostrar con matplotlib (una sola ventana)
-    plt.figure(figsize=(10, 6))
-    plt.imshow(cv2.cvtColor(color_map, cv2.COLOR_BGR2RGB))
-    plt.title("Mapa de Calor de Cobertura del Damero")
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
+def main():
+    root = tk.Tk()
+    app = HeatmapApp(root)
+    root.mainloop()
 
 if __name__ == '__main__':
-    crear_mapa_de_cobertura()
+    main()
