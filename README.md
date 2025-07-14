@@ -1,171 +1,86 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Documentación - Generador de Mapas de Calor</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 20px;
-            color: #333;
-        }
-        h1, h2, h3 {
-            color: #2c3e50;
-        }
-        h1 {
-            border-bottom: 2px solid #3498db;
-            padding-bottom: 10px;
-        }
-        h2 {
-            background-color: #f8f9fa;
-            padding: 8px;
-            border-left: 4px solid #3498db;
-        }
-        code {
-            background-color: #f0f0f0;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-family: monospace;
-        }
-        .note {
-            background-color: #e7f5fe;
-            border-left: 4px solid #3498db;
-            padding: 12px;
-            margin: 15px 0;
-        }
-        .warning {
-            background-color: #fff3bf;
-            border-left: 4px solid #ffd43b;
-            padding: 12px;
-            margin: 15px 0;
-        }
-        .screenshot {
-            border: 1px solid #ddd;
-            max-width: 100%;
-            height: auto;
-            margin: 15px 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-    </style>
-</head>
-<body>
-    <h1>Documentación - Generador de Mapas de Calor para Calibración de Cámaras</h1>
+# Documentación de la Aplicación de Mapa de Calor para Calibración de Cámaras
 
-    <div class="note">
-        <p>Esta herramienta genera mapas de calor que muestran la cobertura del patrón de damero en imágenes de calibración, permitiendo verificar la distribución de las imágenes antes del cálculo de distorsión.</p>
-    </div>
+## Descripción General
 
-    <h2>Instrucciones de Uso</h2>
+Esta aplicación permite visualizar qué parte de un patrón de damero ha sido completada antes de procesar las imágenes para calcular la distorsión de cada cámara. La herramienta genera un mapa de calor que muestra las áreas del damero que han sido capturadas en las imágenes.
 
-    <h3>1. Configuración Inicial</h3>
-    <p>Al abrir la aplicación, seleccione el modo de operación:</p>
-    <ul>
-        <li><strong>Carpeta única:</strong> Para procesar imágenes de una sola cámara</li>
-        <li><strong>Carpeta con subcarpetas:</strong> Para procesar múltiples cámaras organizadas en subcarpetas</li>
-    </ul>
+## Requisitos del Sistema
 
-    <h3>2. Selección de Carpeta</h3>
-    <p>Haga clic en "Examinar..." para seleccionar la carpeta que contiene:</p>
-    <ul>
-        <li>Las imágenes directamente (modo carpeta única)</li>
-        <li>Subcarpetas por cámara (modo múltiple)</li>
-    </ul>
+- Windows 10 o superior
+- Python 3.8 o superior (solo para desarrollo, no necesario para el .exe)
+- OpenCV
+- NumPy
+- Matplotlib
+- Tkinter
 
-    <h3>3. Parámetros de Configuración</h3>
-    <table border="1" cellpadding="8" cellspacing="0" style="width:100%; border-collapse: collapse;">
-        <tr>
-            <th>Parámetro</th>
-            <th>Descripción</th>
-            <th>Valor Típico</th>
-        </tr>
-        <tr>
-            <td>Tamaño del damero</td>
-            <td>Número de esquinas interiores (ancho x alto)</td>
-            <td>10x7</td>
-        </tr>
-        <tr>
-            <td>Resolución de imagen</td>
-            <td>Resolución nativa de la cámara (ancho x alto)</td>
-            <td>4096x3000</td>
-        </tr>
-    </table>
+## Instalación
 
-    <h3>4. Procesamiento</h3>
-    <ol>
-        <li>Haga clic en "Generar Mapa(s) de Calor"</li>
-        <li>Espere a que complete el procesamiento (barra de progreso)</li>
-        <li>Revise los resultados en la ventana interactiva</li>
-    </ol>
+1. Descargue el archivo `HeatmapApp.exe` desde la ubicación proporcionada.
+2. Guarde el archivo en una carpeta de su elección.
+3. Ejecute el archivo `HeatmapApp.exe` para iniciar la aplicación.
 
-    <div class="warning">
-        <p><strong>Nota:</strong> Para cancelar el procesamiento, use el botón "Cancelar". Esto detendrá la operación después de terminar la imagen actual.</p>
-    </div>
+## Uso de la Aplicación
 
-    <h2>Interpretación de Resultados</h2>
+### Interfaz Principal
 
-    <h3>Mapa de Calor Interactivo</h3>
-    <ul>
-        <li><strong>Panel izquierdo:</strong> Muestra el mapa de calor combinado</li>
-        <li><strong>Panel derecho:</strong> Lista de imágenes procesadas (puede seleccionar/deseleccionar)</li>
-        <li><strong>Escala de colores:</strong>
-            <ul>
-                <li>Azul: Zonas con poca cobertura</li>
-                <li>Rojo: Zonas con alta cobertura</li>
-            </ul>
-        </li>
-    </ul>
+La interfaz principal de la aplicación consta de las siguientes secciones:
 
-    <h3>Galería (Modo Múltiple)</h3>
-    <p>Muestra miniaturas de todos los mapas generados. Haga doble clic en cualquier miniatura para abrir el visor detallado.</p>
+1. **Modo de Procesamiento**: Seleccione entre "Carpeta única (una cámara)" o "Carpeta con subcarpetas (múltiples cámaras)".
+2. **Seleccionar Carpeta**: Seleccione la carpeta que contiene las imágenes del damero.
+3. **Configuración**: Configure el tamaño del damero y la resolución de la imagen.
+4. **Botones de Acción**: Generar mapa de calor, limpiar historial y cancelar procesamiento.
+5. **Barra de Progreso**: Muestra el progreso del procesamiento.
+6. **Log de Procesamiento**: Muestra los mensajes de log durante el procesamiento.
 
-    <h2>Requisitos y Compatibilidad</h2>
-    <ul>
-        <li><strong>Sistemas operativos:</strong> Windows 10/11 (64-bit)</li>
-        <li><strong>Formatos soportados:</strong> JPG, JPEG, PNG, BMP, TIFF</li>
-        <li><strong>Estructura de carpetas (modo múltiple):</strong>
-            <pre>
-Carpeta_Principal/
-├── Camara_1/
-│   ├── img1.jpg
-│   └── img2.jpg
-└── Camara_2/
-    ├── img1.jpg
-    └── img2.jpg</pre>
-        </li>
-    </ul>
+### Pasos para Generar un Mapa de Calor
 
-    <h2>Solución de Problemas</h2>
+1. **Seleccionar el Modo de Procesamiento**:
+   - **Carpeta única**: Para procesar imágenes de una sola cámara.
+   - **Carpeta con subcarpetas**: Para procesar imágenes de múltiples cámaras, donde cada subcarpeta representa una cámara diferente.
 
-    <h3>Problemas Comunes</h3>
-    <table border="1" cellpadding="8" cellspacing="0" style="width:100%; border-collapse: collapse; margin-bottom: 20px;">
-        <tr>
-            <th>Problema</th>
-            <th>Solución</th>
-        </tr>
-        <tr>
-            <td>Imágenes no detectadas</td>
-            <td>Verifique que estén en la carpeta correcta y con formatos compatibles</td>
-        </tr>
-        <tr>
-            <td>Procesamiento lento</td>
-            <td>Active "Optimizar rendimiento" o reduzca el tamaño de las imágenes</td>
-        </tr>
-        <tr>
-            <td>Mapa de calor vacío</td>
-            <td>Revise el tamaño del damero y que las imágenes contengan el patrón completo</td>
-        </tr>
-        <tr>
-            <td>Error al guardar</td>
-            <td>Verifique permisos de escritura en la carpeta de destino</td>
-        </tr>
-    </table>
+2. **Seleccionar la Carpeta**:
+   - Haga clic en el botón "Examinar..." para seleccionar la carpeta que contiene las imágenes.
+   - La carpeta seleccionada aparecerá en el cuadro de texto y se actualizará la información de la carpeta.
 
-    <div class="note">
-        <p><strong>Nota final:</strong> La aplicación no modifica las imágenes originales. Todos los resultados se guardan como nuevos archivos PNG en la carpeta de origen.</p>
-    </div>
-</body>
-</html>
+3. **Configurar Parámetros**:
+   - **Tamaño del damero**: Introduzca el número de esquinas interiores del damero (por ejemplo, 10x7).
+   - **Resolución de imagen**: Introduzca la resolución de las imágenes (por ejemplo, 4096x3000).
+
+4. **Generar Mapa de Calor**:
+   - Haga clic en el botón "Generar Mapa(s) de Calor" para iniciar el procesamiento.
+   - El progreso se mostrará en la barra de progreso y en el log de procesamiento.
+
+5. **Visualizar Resultados**:
+   - Una vez completado el procesamiento, se abrirá una ventana con el mapa de calor interactivo.
+   - En el modo de múltiples cámaras, se abrirá una galería con miniaturas de los mapas de calor de cada cámara.
+
+### Mapa de Calor Interactivo
+
+La ventana del mapa de calor interactivo permite:
+
+- **Seleccionar/Desseleccionar Imágenes**: Use las casillas de verificación para seleccionar o deseccionar imágenes individuales.
+- **Guardar Mapa**: Haga clic en el botón "Guardar Mapa" para guardar el mapa de calor actual.
+- **Cerrar**: Haga clic en el botón "Cerrar" para cerrar la ventana.
+
+### Galería de Mapas de Calor
+
+En el modo de múltiples cámaras, se abrirá una galería con miniaturas de los mapas de calor de cada cámara. Haga doble clic en una miniatura para abrir el mapa de calor interactivo de esa cámara.
+
+## Configuración Avanzada
+
+- **Guardar mapas individuales**: Marque esta opción para guardar mapas de calor individuales para cada imagen.
+- **Mostrar gráficos**: Marque esta opción para mostrar gráficos durante el procesamiento.
+- **Optimizar rendimiento**: Marque esta opción para optimizar el rendimiento durante el procesamiento.
+
+## Solución de Problemas
+
+- **Error al cargar imágenes**: Asegúrese de que las imágenes estén en un formato compatible (JPG, JPEG, PNG, BMP, TIFF) y que la carpeta seleccionada contenga imágenes válidas.
+- **Problemas de rendimiento**: Si la aplicación se ejecuta lentamente, asegúrese de que la opción "Optimizar rendimiento" esté marcada y reduzca el tamaño de las imágenes si es posible.
+
+## Contacto
+
+Para cualquier problema o pregunta, póngase en contacto con el departamento de soporte técnico de la empresa.
+
+---
+
+Esta documentación proporciona una guía básica para el uso de la aplicación. Para obtener más información detallada, consulte el código fuente o póngase en contacto con el desarrollador.
