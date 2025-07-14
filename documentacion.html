@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentación de la Aplicación de Mapa de Calor para Calibración de Cámaras</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1, h2, h3 {
+            color: #0066cc;
+        }
+        pre {
+            background-color: #f4f4f4;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        ul, ol {
+            margin-bottom: 20px;
+        }
+        li {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Documentación de la Aplicación de Mapa de Calor para Calibración de Cámaras</h1>
+
+    <h2>Descripción General</h2>
+    <p>Esta aplicación permite visualizar qué parte de un patrón de damero ha sido completada antes de procesar las imágenes para calcular la distorsión de cada cámara. La herramienta genera un mapa de calor que muestra las áreas del damero que han sido capturadas en las imágenes.</p>
+
+    <h2>Requisitos del Sistema</h2>
+    <ul>
+        <li>Windows 10 o superior</li>
+        <li>Python 3.8 o superior (solo para desarrollo, no necesario para el .exe)</li>
+        <li>OpenCV</li>
+        <li>NumPy</li>
+        <li>Matplotlib</li>
+        <li>Tkinter</li>
+    </ul>
+
+    <h2>Instalación</h2>
+    <ol>
+        <li>Descargue el archivo <code>HeatmapApp.exe</code> desde la ubicación proporcionada.</li>
+        <li>Guarde el archivo en una carpeta de su elección.</li>
+        <li>Ejecute el archivo <code>HeatmapApp.exe</code> para iniciar la aplicación.</li>
+    </ol>
+
+    <h2>Uso de la Aplicación</h2>
+
+    <h3>Interfaz Principal</h3>
+    <p>La interfaz principal de la aplicación consta de las siguientes secciones:</p>
+    <ol>
+        <li><strong>Modo de Procesamiento</strong>: Seleccione entre "Carpeta única (una cámara)" o "Carpeta con subcarpetas (múltiples cámaras)".</li>
+        <li><strong>Seleccionar Carpeta</strong>: Seleccione la carpeta que contiene las imágenes del damero.</li>
+        <li><strong>Configuración</strong>: Configure el tamaño del damero y la resolución de la imagen.</li>
+        <li><strong>Botones de Acción</strong>: Generar mapa de calor, limpiar historial y cancelar procesamiento.</li>
+        <li><strong>Barra de Progreso</strong>: Muestra el progreso del procesamiento.</li>
+        <li><strong>Log de Procesamiento</strong>: Muestra los mensajes de log durante el procesamiento.</li>
+    </ol>
+
+    <h3>Pasos para Generar un Mapa de Calor</h3>
+    <ol>
+        <li><strong>Seleccionar el Modo de Procesamiento</strong>:
+            <ul>
+                <li><strong>Carpeta única</strong>: Para procesar imágenes de una sola cámara.</li>
+                <li><strong>Carpeta con subcarpetas</strong>: Para procesar imágenes de múltiples cámaras, donde cada subcarpeta representa una cámara diferente.</li>
+            </ul>
+        </li>
+        <li><strong>Seleccionar la Carpeta</strong>:
+            <ul>
+                <li>Haga clic en el botón "Examinar..." para seleccionar la carpeta que contiene las imágenes.</li>
+                <li>La carpeta seleccionada aparecerá en el cuadro de texto y se actualizará la información de la carpeta.</li>
+            </ul>
+        </li>
+        <li><strong>Configurar Parámetros</strong>:
+            <ul>
+                <li><strong>Tamaño del damero</strong>: Introduzca el número de esquinas interiores del damero (por ejemplo, 10x7).</li>
+                <li><strong>Resolución de imagen</strong>: Introduzca la resolución de las imágenes (por ejemplo, 4096x3000).</li>
+            </ul>
+        </li>
+        <li><strong>Generar Mapa de Calor</strong>:
+            <ul>
+                <li>Haga clic en el botón "Generar Mapa(s) de Calor" para iniciar el procesamiento.</li>
+                <li>El progreso se mostrará en la barra de progreso y en el log de procesamiento.</li>
+            </ul>
+        </li>
+        <li><strong>Visualizar Resultados</strong>:
+            <ul>
+                <li>Una vez completado el procesamiento, se abrirá una ventana con el mapa de calor interactivo.</li>
+                <li>En el modo de múltiples cámaras, se abrirá una galería con miniaturas de los mapas de calor de cada cámara.</li>
+            </ul>
+        </li>
+    </ol>
+
+    <h3>Mapa de Calor Interactivo</h3>
+    <p>La ventana del mapa de calor interactivo permite:</p>
+    <ul>
+        <li><strong>Seleccionar/Desseleccionar Imágenes</strong>: Use las casillas de verificación para seleccionar o deseccionar imágenes individuales.</li>
+        <li><strong>Guardar Mapa</strong>: Haga clic en el botón "Guardar Mapa" para guardar el mapa de calor actual.</li>
+        <li><strong>Cerrar</strong>: Haga clic en el botón "Cerrar" para cerrar la ventana.</li>
+    </ul>
+
+    <h3>Galería de Mapas de Calor</h3>
+    <p>En el modo de múltiples cámaras, se abrirá una galería con miniaturas de los mapas de calor de cada cámara. Haga doble clic en una miniatura para abrir el mapa de calor interactivo de esa cámara.</p>
+
+    <h2>Configuración Avanzada</h2>
+    <ul>
+        <li><strong>Guardar mapas individuales</strong>: Marque esta opción para guardar mapas de calor individuales para cada imagen.</li>
+        <li><strong>Mostrar gráficos</strong>: Marque esta opción para mostrar gráficos durante el procesamiento.</li>
+        <li><strong>Optimizar rendimiento</strong>: Marque esta opción para optimizar el rendimiento durante el procesamiento.</li>
+    </ul>
+
+    <h2>Solución de Problemas</h2>
+    <ul>
+        <li><strong>Error al cargar imágenes</strong>: Asegúrese de que las imágenes estén en un formato compatible (JPG, JPEG, PNG, BMP, TIFF) y que la carpeta seleccionada contenga imágenes válidas.</li>
+        <li><strong>Problemas de rendimiento</strong>: Si la aplicación se ejecuta lentamente, asegúrese de que la opción "Optimizar rendimiento" esté marcada y reduzca el tamaño de las imágenes si es posible.</li>
+    </ul>
+
+    <h2>Contacto</h2>
+    <p>Para cualquier problema o pregunta, póngase en contacto con el departamento de soporte técnico de la empresa.</p>
+
+    <p>Esta documentación proporciona una guía básica para el uso de la aplicación. Para obtener más información detallada, consulte el código fuente o póngase en contacto con el desarrollador.</p>
+</body>
+</html>
