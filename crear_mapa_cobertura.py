@@ -11,6 +11,7 @@ from datetime import datetime
 import gc
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from PIL import Image, ImageTk  # Nuevas importaciones para manejar imágenes
 
 # --- CONFIGURACIÓN ---
 CHESSBOARD_SIZE = (10, 7)  # Esquinas interiores del damero
@@ -141,6 +142,90 @@ class HeatmapViewer(tk.Toplevel):
         color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
         cv2.imwrite(self.output_path, color_map)
         messagebox.showinfo("Guardado", f"Mapa de calor guardado en:\n{self.output_path}")
+
+
+class HeatmapGallery(tk.Toplevel):
+    """Nueva clase para mostrar una galería de miniaturas de mapas de calor"""
+    def __init__(self, parent, gallery_items, image_resolution, show_plots):
+        super().__init__(parent)
+        self.title("Galería de Mapas de Calor")
+        self.geometry("1200x800")
+        self.gallery_items = gallery_items
+        self.image_resolution = image_resolution
+        self.show_plots = show_plots
+        self.setup_ui()
+
+    def setup_ui(self):
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Canvas con scroll
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Crear una cuadrícula de 3 columnas
+        cols = 3
+        for i, item in enumerate(self.gallery_items):
+            row = i // cols
+            col = i % cols
+            frame = ttk.Frame(scrollable_frame, padding=10, relief="groove", borderwidth=1)
+            frame.grid(row=row, column=col, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=10)
+            
+            # Título
+            label = ttk.Label(frame, text=item['camera_name'], font=('Arial', 10, 'bold'))
+            label.pack(pady=(0, 5))
+            
+            # Generar miniatura
+            heatmap_normalized = cv2.normalize(item['heatmap'], None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
+            img_rgb = cv2.cvtColor(color_map, cv2.COLOR_BGR2RGB)
+            
+            # Reducir tamaño para miniatura
+            preview = cv2.resize(img_rgb, (300, 225))
+            img_tk = self.convert_to_tk(preview)
+            
+            # Mostrar miniatura
+            img_label = ttk.Label(frame, image=img_tk)
+            img_label.image = img_tk  # mantener referencia
+            img_label.pack()
+            
+            # Texto informativo
+            info_label = ttk.Label(frame, text=f"{item['processed_count']}/{item['total_files']} imágenes")
+            info_label.pack(pady=(5, 0))
+            
+            # Asignar evento de doble clic
+            img_label.bind("<Double-Button-1>", lambda e, item=item: self.open_heatmap_viewer(item))
+    
+    def convert_to_tk(self, img_rgb):
+        """Convierte una imagen RGB a formato Tkinter"""
+        img_pil = Image.fromarray(img_rgb)
+        img_tk = ImageTk.PhotoImage(image=img_pil)
+        return img_tk
+    
+    def open_heatmap_viewer(self, item):
+        """Abre el visor interactivo para el mapa seleccionado"""
+        HeatmapViewer(
+            self.master, 
+            item['heatmap'], 
+            item['masks'], 
+            item['camera_name'], 
+            item['output_path'], 
+            self.image_resolution, 
+            self.show_plots
+        )
+
 
 class HeatmapApp:
     def __init__(self, root):
@@ -534,6 +619,7 @@ class HeatmapApp:
         
         total_cameras = len(self.camera_folders)
         successful_cameras = 0
+        gallery_items = []  # Lista para almacenar los resultados para la galería
         
         for i, camera_info in enumerate(self.camera_folders):
             if self.cancel_processing_flag:
@@ -564,8 +650,15 @@ class HeatmapApp:
                 color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
                 cv2.imwrite(output_path, color_map)
                 
-                # Abrir visor interactivo
-                self.open_heatmap_viewer(heatmap, masks, camera_name, output_path, img_resolution)
+                # Guardar datos para la galería
+                gallery_items.append({
+                    'camera_name': camera_name,
+                    'heatmap': heatmap,
+                    'masks': masks,
+                    'output_path': output_path,
+                    'processed_count': processed_count,
+                    'total_files': total_files
+                })
                 
                 successful_cameras += 1
                 self.log_message(f"✅ {camera_name}: Completado")
@@ -577,6 +670,14 @@ class HeatmapApp:
         self.progress_label.config(text="Completado")
         
         if successful_cameras > 0:
+            # Abrir la galería con todos los mapas de calor
+            self.root.after(0, lambda: HeatmapGallery(
+                self.root, 
+                gallery_items, 
+                img_resolution, 
+                self.show_plots.get()
+            ))
+            
             self.log_message(f"🎉 Procesamiento completado: {successful_cameras}/{total_cameras} cámaras")
             messagebox.showinfo("Éxito", 
                 f"Procesamiento completado exitosamente:\n"
