@@ -562,6 +562,26 @@ class HeatmapApp:
         ttk.Checkbutton(options_frame, text="Optimizar rendimiento", 
                        variable=self.optimize_performance).grid(row=1, column=0, sticky=tk.W, pady=(5, 0))
         
+        self.save_debug_images = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text="Guardar imágenes de depuración", 
+                       variable=self.save_debug_images).grid(row=1, column=1, sticky=tk.W, padx=(20, 0), pady=(5, 0))
+        
+        # Control de sensibilidad de detección
+        sensitivity_frame = ttk.Frame(config_frame)
+        sensitivity_frame.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        
+        ttk.Label(sensitivity_frame, text="Sensibilidad de detección:").grid(row=0, column=0, sticky=tk.W)
+        
+        self.detection_sensitivity = tk.DoubleVar(value=3.0)
+        sensitivity_scale = ttk.Scale(sensitivity_frame, from_=1.0, to=5.0, 
+                                     variable=self.detection_sensitivity, 
+                                     orient=tk.HORIZONTAL, length=200)
+        sensitivity_scale.grid(row=0, column=1, padx=(10, 0))
+        
+        # Etiquetas para la escala
+        ttk.Label(sensitivity_frame, text="Baja").grid(row=1, column=1, sticky=tk.W, padx=(10, 0))
+        ttk.Label(sensitivity_frame, text="Alta").grid(row=1, column=1, sticky=tk.E)
+        
         # Botones de acción
         action_frame = ttk.Frame(main_frame)
         action_frame.grid(row=4, column=0, columnspan=3, pady=(0, 20))
@@ -776,6 +796,8 @@ class HeatmapApp:
             # Obtener configuración
             chess_size = (int(self.chess_width.get()), int(self.chess_height.get()))
             img_resolution = (int(self.img_width.get()), int(self.img_height.get()))
+            detection_sensitivity = self.detection_sensitivity.get()
+            save_debug_images = self.save_debug_images.get()
             
             # Validar configuración
             if chess_size[0] <= 0 or chess_size[1] <= 0:
@@ -794,14 +816,17 @@ class HeatmapApp:
         self.generate_btn.config(state='disabled')
         self.cancel_btn.config(state='normal')
         self.log_text.delete(1.0, tk.END)
+        self.log_message(f"🔍 Sensibilidad de detección: {detection_sensitivity:.1f}")
+        if save_debug_images:
+            self.log_message("🔍 Guardando imágenes de depuración")
         
         try:
             mode = self.processing_mode.get()
             
             if mode == "single":
-                self.process_single_camera(folder, chess_size, img_resolution)
+                self.process_single_camera(folder, chess_size, img_resolution, detection_sensitivity, save_debug_images)
             else:
-                self.process_multiple_cameras(folder, chess_size, img_resolution)
+                self.process_multiple_cameras(folder, chess_size, img_resolution, detection_sensitivity, save_debug_images)
                 
         except Exception as e:
             self.log_message(f"❌ Error: {str(e)}")
@@ -813,13 +838,13 @@ class HeatmapApp:
             self.progress.config(value=0)
             self.progress_label.config(text="")
     
-    def process_single_camera(self, folder, chess_size, img_resolution):
+    def process_single_camera(self, folder, chess_size, img_resolution, detection_sensitivity, save_debug_images):
         self.log_message("🎯 Procesando cámara única...")
         
         output_path = os.path.join(os.path.dirname(folder), f"mapa_calor_{os.path.basename(folder)}.png")
         
         success, heatmap, polygons_info, processed_count, total_files = self.crear_mapa_de_cobertura(
-            folder, chess_size, img_resolution, output_path, "Cámara única"
+            folder, chess_size, img_resolution, output_path, "Cámara única", detection_sensitivity, save_debug_images
         )
         
         if success:
@@ -836,7 +861,7 @@ class HeatmapApp:
             self.log_message("❌ No se pudo procesar ninguna imagen válida")
             messagebox.showwarning("Advertencia", "No se pudo procesar ninguna imagen válida")
     
-    def process_multiple_cameras(self, folder, chess_size, img_resolution):
+    def process_multiple_cameras(self, folder, chess_size, img_resolution, detection_sensitivity, save_debug_images):
         if not self.camera_folders:
             self.log_message("❌ No hay carpetas de cámaras para procesar")
             return
@@ -867,7 +892,7 @@ class HeatmapApp:
             output_path = os.path.join(folder, f"mapa_calor_{camera_name}.png")
             
             success, heatmap, polygons_info, processed_count, total_files = self.crear_mapa_de_cobertura(
-                camera_path, chess_size, img_resolution, output_path, camera_name
+                camera_path, chess_size, img_resolution, output_path, camera_name, detection_sensitivity, save_debug_images
             )
             
             if success:
@@ -913,10 +938,17 @@ class HeatmapApp:
             self.log_message("❌ No se pudo procesar ninguna cámara")
             messagebox.showwarning("Advertencia", "No se pudo procesar ninguna cámara")
     
-    def crear_mapa_de_cobertura(self, images_path, chessboard_size, image_resolution, output_path, camera_name):
+    def crear_mapa_de_cobertura(self, images_path, chessboard_size, image_resolution, output_path, camera_name, detection_sensitivity, save_debug_images):
         heatmap = np.zeros((image_resolution[1], image_resolution[0]), dtype=np.float32)
         polygons_info = []  # (filename, polygon, bbox, centroid)
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        
+        # Crear carpeta para imágenes de depuración si es necesario
+        debug_folder = None
+        if save_debug_images:
+            debug_folder = os.path.join(os.path.dirname(output_path), f"debug_{os.path.basename(images_path)}")
+            os.makedirs(debug_folder, exist_ok=True)
+            self.log_message(f"📁 Carpeta de depuración: {debug_folder}")
         
         image_files = self.find_images_in_folder(images_path)
         total_files = len(image_files)
@@ -941,17 +973,99 @@ class HeatmapApp:
             new_height = int(original_height * scale_factor)
             img_resized = cv2.resize(img, (new_width, new_height))
             
-            # Modificaciones propuestas
+            # Mejoras en la detección del damero
             gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
-            gray = cv2.GaussianBlur(gray, (5,5), 0)
-            flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_FAST_CHECK
-            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.0001)
-            ret, corners = cv2.findChessboardCorners(gray, chessboard_size, flags=flags)
+            
+            # Usar el nivel de sensibilidad pasado como parámetro
+            sensitivity = detection_sensitivity
+            
+            # Ajustar parámetros basados en la sensibilidad
+            # Mayor sensibilidad = procesamiento más agresivo y más variantes
+            blur_size = max(3, int(5 - sensitivity))
+            clahe_clip = 2.0 + sensitivity / 2.0
+            gamma_value = 1.0 + sensitivity / 5.0
+            canny_threshold1 = int(70 - sensitivity * 10)
+            canny_threshold2 = int(150 + sensitivity * 10)
+            
+            # Aplicar múltiples técnicas de preprocesamiento para mejorar la detección
+            img_versions = []
+            
+            # Siempre incluir la imagen original
+            img_versions.append(gray)
+            
+            # Versión 1: Ecualización de histograma con filtro gaussiano
+            gray_eq = cv2.equalizeHist(gray)
+            gray_eq_blur = cv2.GaussianBlur(gray_eq, (blur_size, blur_size), 1.0)
+            img_versions.append(gray_eq_blur)
+            
+            # Versión 2: Filtro adaptativo para mejorar contraste local
+            clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(8, 8))
+            gray_clahe = clahe.apply(gray)
+            gray_clahe_blur = cv2.GaussianBlur(gray_clahe, (blur_size, blur_size), 1.0)
+            img_versions.append(gray_clahe_blur)
+            
+            # Versión 3: Ajuste de gamma para mejorar detalles en áreas oscuras
+            gray_gamma = np.array(255 * (gray / 255) ** gamma_value, dtype='uint8')
+            img_versions.append(gray_gamma)
+            
+            # Versión 4: Filtro bilateral para preservar bordes
+            gray_bilateral = cv2.bilateralFilter(gray, 11, 17, 17)
+            img_versions.append(gray_bilateral)
+            
+            # Versión 5: Detección de bordes con Canny + dilatación para conectar bordes
+            edges = cv2.Canny(gray, canny_threshold1, canny_threshold2)
+            kernel = np.ones((5, 5), np.uint8)
+            edges_dilated = cv2.dilate(edges, kernel, iterations=1)
+            img_versions.append(255 - edges_dilated)  # Invertir para que los bordes sean oscuros
+            
+            # Con alta sensibilidad, añadir versiones adicionales
+            if sensitivity > 3.0:
+                # Versión 6: Combinación de CLAHE y gamma
+                gray_clahe_gamma = np.array(255 * (gray_clahe / 255) ** gamma_value, dtype='uint8')
+                img_versions.append(gray_clahe_gamma)
+                
+                # Versión 7: Umbralización adaptativa
+                gray_thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                                  cv2.THRESH_BINARY, 11, 2)
+                img_versions.append(255 - gray_thresh)  # Invertir para que el damero sea oscuro
+            
+            # Configurar parámetros de detección más robustos
+            flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE | \
+                    cv2.CALIB_CB_FILTER_QUADS | cv2.CALIB_CB_FAST_CHECK
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.000001)
+            
+            # Intentar detectar el damero en cada versión de la imagen
+            ret = False
+            corners = None
+            
+            for img_version in img_versions:
+                if self.cancel_processing_flag:
+                    return None
+                    
+                # Intentar con esta versión de la imagen
+                ret_attempt, corners_attempt = cv2.findChessboardCorners(img_version, chessboard_size, flags=flags)
+                
+                if ret_attempt:
+                    ret = True
+                    corners = corners_attempt
+                    break
+            
+            # Si no se detectó con ninguna versión, intentar con findChessboardCornersSB (más robusto pero más lento)
+            if not ret:
+                try:
+                    # Este método es más robusto para dameros parcialmente visibles o con distorsión
+                    ret, corners = cv2.findChessboardCornersSB(gray, chessboard_size, flags=flags)
+                except:
+                    # Si el método no está disponible (versiones antiguas de OpenCV), usar el método estándar una última vez
+                    ret, corners = cv2.findChessboardCorners(gray, chessboard_size, flags=flags)
             
             if not ret:
                 return None
             
-            corners_subpix = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            # Mejorar la precisión de las esquinas detectadas
+            # Usar una ventana más grande para el refinamiento de esquinas
+            # y criterios más estrictos para mayor precisión
+            corners_subpix = cv2.cornerSubPix(gray, corners, (13, 13), (-1, -1), criteria)
             
             # Obtener las esquinas del tablero
             top_left = corners_subpix[0][0]
@@ -978,8 +1092,64 @@ class HeatmapApp:
             # Calcular centroide
             centroid = (int(np.mean(x_coords)), int(np.mean(y_coords)))
             
-            # Liberar memoria
-            del img, img_resized, gray
+            # Opcionalmente guardar una imagen con el damero detectado para verificación
+            if self.save_individual.get() or save_debug_images:
+                # Crear una copia de la imagen original para dibujar
+                img_with_corners = img_resized.copy()
+                # Dibujar las esquinas y el patrón del damero
+                cv2.drawChessboardCorners(img_with_corners, chessboard_size, corners_subpix, ret)
+                # Dibujar el polígono que delimita el damero
+                pts_draw = np.array([top_left, top_right, bottom_right, bottom_left], np.int32).reshape((-1, 1, 2))
+                pts_draw = (pts_draw / np.array([scale_back_x, scale_back_y], dtype=np.float32)).astype(np.int32)
+                cv2.polylines(img_with_corners, [pts_draw], True, (0, 255, 0), 2)
+                # Dibujar el centroide
+                centroid_draw = (int(centroid[0] / scale_back_x), int(centroid[1] / scale_back_y))
+                cv2.circle(img_with_corners, centroid_draw, 5, (0, 0, 255), -1)
+                
+                base_filename = os.path.basename(filename)
+                
+                # Guardar en subcarpeta de verificación si está habilitado
+                if self.save_individual.get():
+                    verify_dir = os.path.join(os.path.dirname(output_path), "verificacion_damero")
+                    os.makedirs(verify_dir, exist_ok=True)
+                    verify_path = os.path.join(verify_dir, f"detected_{base_filename}")
+                    cv2.imwrite(verify_path, img_with_corners)
+                
+                # Guardar en carpeta de depuración si está habilitado
+                if save_debug_images and debug_folder:
+                    # Añadir información adicional a la imagen
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    cv2.putText(img_with_corners, f"Sensibilidad: {sensitivity:.1f}", (10, 30), font, 0.7, (0, 0, 255), 2)
+                    
+                    # Guardar versiones de preprocesamiento también
+                    for i, img_version in enumerate(img_versions):
+                        # Convertir a color para poder dibujar
+                        if len(img_version.shape) == 2:
+                            img_version_color = cv2.cvtColor(img_version, cv2.COLOR_GRAY2BGR)
+                        else:
+                            img_version_color = img_version.copy()
+                            
+                        # Añadir etiqueta de versión
+                        cv2.putText(img_version_color, f"Versión {i}", (10, 30), font, 0.7, (0, 0, 255), 2)
+                        
+                        # Guardar
+                        version_path = os.path.join(debug_folder, f"v{i}_{base_filename}")
+                        cv2.imwrite(version_path, img_version_color)
+                    
+                    # Guardar imagen con detección
+                    debug_path = os.path.join(debug_folder, f"detected_{base_filename}")
+                    cv2.imwrite(debug_path, img_with_corners)
+            
+            # Liberar memoria de manera más agresiva
+            del img, img_resized, gray, img_versions
+            if 'img_with_corners' in locals():
+                del img_with_corners
+            if 'img_version_color' in locals():
+                del img_version_color
+            if 'pts_draw' in locals():
+                del pts_draw
+            if 'centroid_draw' in locals():
+                del centroid_draw
             if self.optimize_performance.get():
                 gc.collect()
                 
