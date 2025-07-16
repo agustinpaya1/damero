@@ -19,7 +19,6 @@ import math
 CHESSBOARD_SIZE = (10, 7)  # Esquinas interiores del damero
 IMAGE_RESOLUTION = (4096, 3000)
 MAX_WORKERS = 8  # Número máximo de hilos para procesamiento concurrente
-SQUARE_SIZE_MM = 30
 REDUCED_RESOLUTION = (1024, 768)  # Resolución reducida para procesamiento interno
 # --- FIN CONFIGURACIÓN ---
 
@@ -534,12 +533,6 @@ class HeatmapApp:
         ttk.Label(chess_frame, text="x").grid(row=0, column=1, padx=5)
         ttk.Entry(chess_frame, textvariable=self.chess_height, width=5).grid(row=0, column=2)
         
-        # Tamaño del cuadrado en mm
-        ttk.Label(config_frame, text="Tamaño cuadrado (mm):").grid(row=0, column=2, sticky=tk.W, padx=(20, 0))
-        
-        self.square_size = tk.StringVar(value=str(SQUARE_SIZE_MM))
-        ttk.Entry(config_frame, textvariable=self.square_size, width=6).grid(row=0, column=3, padx=(10, 0))
-        
         # Resolución de imagen
         ttk.Label(config_frame, text="Resolución de imagen:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
         
@@ -552,7 +545,7 @@ class HeatmapApp:
         ttk.Entry(res_frame, textvariable=self.img_width, width=6).grid(row=0, column=0)
         ttk.Label(res_frame, text="x").grid(row=0, column=1, padx=5)
         ttk.Entry(res_frame, textvariable=self.img_height, width=6).grid(row=0, column=2)
-
+        
         # Opciones adicionales
         options_frame = ttk.Frame(config_frame)
         options_frame.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
@@ -736,12 +729,24 @@ class HeatmapApp:
             self.generate_btn.config(state='disabled')
     
     def find_images_in_folder(self, folder):
-        image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']
-        image_files = []
-        for ext in image_extensions:
-            image_files.extend(glob.glob(os.path.join(folder, ext)))
-            image_files.extend(glob.glob(os.path.join(folder, ext.upper())))
-        return image_files
+            image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']
+            image_files = []
+            for ext in image_extensions:
+                image_files.extend(glob.glob(os.path.join(folder, ext)))
+                image_files.extend(glob.glob(os.path.join(folder, ext.upper())))
+            
+            # Eliminar duplicados usando rutas reales normalizadas
+            unique_files = set()
+            result = []
+            for file_path in image_files:
+                # Obtener la ruta real (resuelve enlaces simbólicos)
+                real_path = os.path.realpath(file_path)
+                # Normalizar la ruta para comparación consistente
+                normalized_path = os.path.normcase(real_path)
+                if normalized_path not in unique_files:
+                    unique_files.add(normalized_path)
+                    result.append(file_path)
+            return result
     
     def log_message(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -771,15 +776,12 @@ class HeatmapApp:
             # Obtener configuración
             chess_size = (int(self.chess_width.get()), int(self.chess_height.get()))
             img_resolution = (int(self.img_width.get()), int(self.img_height.get()))
-            square_size_mm = float(self.square_size.get())
             
             # Validar configuración
             if chess_size[0] <= 0 or chess_size[1] <= 0:
                 raise ValueError("El tamaño del damero debe ser positivo")
             if img_resolution[0] <= 0 or img_resolution[1] <= 0:
                 raise ValueError("La resolución de imagen debe ser positiva")
-            if square_size_mm <= 0:
-                raise ValueError("El tamaño del cuadrado debe ser positivo")
                 
         except ValueError as e:
             messagebox.showerror("Error de configuración", f"Configuración inválida: {str(e)}")
@@ -797,9 +799,9 @@ class HeatmapApp:
             mode = self.processing_mode.get()
             
             if mode == "single":
-                self.process_single_camera(folder, chess_size, img_resolution, square_size_mm)
+                self.process_single_camera(folder, chess_size, img_resolution)
             else:
-                self.process_multiple_cameras(folder, chess_size, img_resolution, square_size_mm)
+                self.process_multiple_cameras(folder, chess_size, img_resolution)
                 
         except Exception as e:
             self.log_message(f"❌ Error: {str(e)}")
@@ -811,13 +813,13 @@ class HeatmapApp:
             self.progress.config(value=0)
             self.progress_label.config(text="")
     
-    def process_single_camera(self, folder, chess_size, img_resolution,square_size_mm):
+    def process_single_camera(self, folder, chess_size, img_resolution):
         self.log_message("🎯 Procesando cámara única...")
         
         output_path = os.path.join(os.path.dirname(folder), f"mapa_calor_{os.path.basename(folder)}.png")
         
         success, heatmap, polygons_info, processed_count, total_files = self.crear_mapa_de_cobertura(
-            folder, chess_size, img_resolution, output_path, "Cámara única", square_size_mm
+            folder, chess_size, img_resolution, output_path, "Cámara única"
         )
         
         if success:
@@ -834,7 +836,7 @@ class HeatmapApp:
             self.log_message("❌ No se pudo procesar ninguna imagen válida")
             messagebox.showwarning("Advertencia", "No se pudo procesar ninguna imagen válida")
     
-    def process_multiple_cameras(self, folder, chess_size, img_resolution, square_size_mm):
+    def process_multiple_cameras(self, folder, chess_size, img_resolution):
         if not self.camera_folders:
             self.log_message("❌ No hay carpetas de cámaras para procesar")
             return
@@ -865,7 +867,7 @@ class HeatmapApp:
             output_path = os.path.join(folder, f"mapa_calor_{camera_name}.png")
             
             success, heatmap, polygons_info, processed_count, total_files = self.crear_mapa_de_cobertura(
-                camera_path, chess_size, img_resolution, output_path, camera_name, square_size_mm
+                camera_path, chess_size, img_resolution, output_path, camera_name
             )
             
             if success:
@@ -911,17 +913,10 @@ class HeatmapApp:
             self.log_message("❌ No se pudo procesar ninguna cámara")
             messagebox.showwarning("Advertencia", "No se pudo procesar ninguna cámara")
     
-    def crear_mapa_de_cobertura(self, images_path, chessboard_size, image_resolution, output_path, camera_name,square_size_mm):
+    def crear_mapa_de_cobertura(self, images_path, chessboard_size, image_resolution, output_path, camera_name):
         heatmap = np.zeros((image_resolution[1], image_resolution[0]), dtype=np.float32)
         polygons_info = []  # (filename, polygon, bbox, centroid)
-        
-        # Criterios mejorados con el tamaño del cuadrado
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-        
-        # Preparar puntos de objeto 3D usando el tamaño del cuadrado
-        objp = np.zeros((chessboard_size[0] * chessboard_size[1], 3), np.float32)
-        objp[:, :2] = np.mgrid[0:chessboard_size[0], 0:chessboard_size[1]].T.reshape(-1, 2)
-        objp *= square_size_mm  # Escalar según el tamaño real del cuadrado
         
         image_files = self.find_images_in_folder(images_path)
         total_files = len(image_files)
@@ -929,115 +924,66 @@ class HeatmapApp:
             return False, None, [], 0, 0
         
         processed_count = 0
-        progress_lock = threading.Lock()
-
+        progress_lock = threading.Lock()  # Para actualizar progress de manera segura
+        
         def procesar_imagen(filename):
-            try:
-                if self.cancel_processing_flag:
-                    return None
-                    
-                # Leer imagen manteniendo calidad original
-                img = cv2.imread(filename, cv2.IMREAD_UNCHANGED)
-                if img is None:
-                    return None
-                
-                # Convertir a escala de grises sin redimensionar
-                if len(img.shape) == 3:
-                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                else:
-                    gray = img.copy()
-                
-                # Parámetros optimizados para patrones grandes
-                flags = (cv2.CALIB_CB_ADAPTIVE_THRESH + 
-                         cv2.CALIB_CB_NORMALIZE_IMAGE + 
-                         cv2.CALIB_CB_FILTER_QUADS)
-                
-                # Intentar detectar el patrón del damero
-                ret, corners = cv2.findChessboardCorners(
-                    gray, 
-                    chessboard_size,
-                    flags=flags
-                )
-                
-                if not ret:
-                    # Segundo intento con método alternativo
-                    ret, corners = cv2.findChessboardCorners(
-                        gray,
-                        chessboard_size,
-                        flags=cv2.CALIB_CB_ADAPTIVE_THRESH
-                    )
-                
-                if not ret:
-                    return None
-                
-                # Refinar esquinas con parámetros basados en el tamaño del cuadrado
-                win_size = min(31, int(square_size_mm / 2))  # Tamaño de ventana basado en mm
-                if win_size % 2 == 0:  # Asegurar tamaño impar
-                    win_size = max(5, win_size - 1)
-                    
-                corners_subpix = cv2.cornerSubPix(
-                    gray, 
-                    corners, 
-                    (win_size, win_size), 
-                    (-1, -1), 
-                    criteria
-                )
-                
-                # Calcular la matriz de transformación usando solvePnP
-                ret, rvec, tvec = cv2.solvePnP(
-                    objp, 
-                    corners_subpix, 
-                    np.eye(3),  # Matriz de cámara ficticia
-                    np.zeros(4)  # Coeficientes de distorsión nulos
-                )
-                
-                if not ret:
-                    return None
-                
-                # Proyectar esquinas a la imagen usando los parámetros calculados
-                img_points, _ = cv2.projectPoints(
-                    np.array([
-                        [0, 0, 0],
-                        [chessboard_size[0]-1, 0, 0],
-                        [chessboard_size[0]-1, chessboard_size[1]-1, 0],
-                        [0, chessboard_size[1]-1, 0]
-                    ], dtype=np.float32) * square_size_mm,
-                    rvec, 
-                    tvec, 
-                    np.eye(3),  # Matriz de cámara
-                    np.zeros(4)  # Sin distorsión
-                )
-                
-                # Crear polígono con las esquinas proyectadas
-                pts = img_points.reshape(-1, 2).astype(np.int32)
-                
-                # Calcular bounding box
-                x_coords = pts[:, 0]
-                y_coords = pts[:, 1]
-                bbox = (int(min(x_coords)), int(min(y_coords)), int(max(x_coords)), int(max(y_coords)))
-                
-                # Calcular centroide
-                centroid = (int(np.mean(x_coords)), int(np.mean(y_coords)))
-                
-                return filename, pts, bbox, centroid
-                
-            except Exception as e:
-                self.log_message(f"⚠️ Error procesando {os.path.basename(filename)}: {str(e)}")
+            if self.cancel_processing_flag:
                 return None
-            finally:
-                # Liberar memoria explícitamente
-                if 'img' in locals():
-                    del img
-                if 'gray' in locals():
-                    del gray
-                if 'corners_subpix' in locals():
-                    del corners_subpix
+                
+            img = cv2.imread(filename)
+            if img is None:
+                return None
+            
+            # Reducir la imagen para procesamiento
+            original_height, original_width = img.shape[:2]
+            scale_factor = min(REDUCED_RESOLUTION[0]/original_width, REDUCED_RESOLUTION[1]/original_height)
+            new_width = int(original_width * scale_factor)
+            new_height = int(original_height * scale_factor)
+            img_resized = cv2.resize(img, (new_width, new_height))
+            
+            gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
+            flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
+            ret, corners = cv2.findChessboardCorners(gray, chessboard_size, flags=flags)
+            
+            if not ret:
+                return None
+            
+            corners_subpix = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            
+            # Obtener las esquinas del tablero
+            top_left = corners_subpix[0][0]
+            top_right = corners_subpix[chessboard_size[0] - 1][0]
+            bottom_right = corners_subpix[-1][0]
+            bottom_left = corners_subpix[-chessboard_size[0]][0]
+            
+            # Escalar de vuelta a la resolución original
+            scale_back_x = original_width / new_width
+            scale_back_y = original_height / new_height
+            top_left = (top_left[0] * scale_back_x, top_left[1] * scale_back_y)
+            top_right = (top_right[0] * scale_back_x, top_right[1] * scale_back_y)
+            bottom_right = (bottom_right[0] * scale_back_x, bottom_right[1] * scale_back_y)
+            bottom_left = (bottom_left[0] * scale_back_x, bottom_left[1] * scale_back_y)
+            
+            # Crear polígono
+            pts = np.array([top_left, top_right, bottom_right, bottom_left], np.int32).reshape((-1, 1, 2))
+            
+            # Calcular bounding box
+            x_coords = pts[:,0,0]
+            y_coords = pts[:,0,1]
+            bbox = (int(min(x_coords)), int(min(y_coords)), int(max(x_coords)), int(max(y_coords)))
+            
+            # Calcular centroide
+            centroid = (int(np.mean(x_coords)), int(np.mean(y_coords)))
+            
+            # Liberar memoria
+            del img, img_resized, gray
+            if self.optimize_performance.get():
                 gc.collect()
+                
+            return filename, pts, bbox, centroid
 
-        # Usar ThreadPoolExecutor con manejo de memoria optimizado
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(MAX_WORKERS, os.cpu_count() or 2)
-        ) as executor:
+        # Usar ThreadPoolExecutor para procesamiento concurrente
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = {executor.submit(procesar_imagen, f): f for f in image_files}
             
             for future in concurrent.futures.as_completed(futures):
@@ -1045,53 +991,32 @@ class HeatmapApp:
                     executor.shutdown(wait=False, cancel_futures=True)
                     break
                     
-                filename = futures[future]
-                try:
-                    result = future.result()
-                except Exception as e:
-                    result = None
-                    self.log_message(f"⚠️ Error grave en {os.path.basename(filename)}: {str(e)}")
-                
-                with progress_lock:
-                    processed_count += 1
-                    current_progress = min(100, processed_count / total_files * 100)
-                    self.root.after(0, lambda p=current_progress: self.progress.config(value=p))
+                result = future.result()
+                if result:
+                    filename, pts, bbox, centroid = result
+                    polygons_info.append((filename, pts, bbox, centroid))
                     
-                    if result:
-                        filename, pts, bbox, centroid = result
-                        polygons_info.append((filename, pts, bbox, centroid))
-                        
-                        # Crear máscara solo para la región del bbox
-                        x_min, y_min, x_max, y_max = bbox
-                        width = x_max - x_min + 1
-                        height = y_max - y_min + 1
-                        
-                        # Verificar límites de la imagen
-                        if (x_min >= 0 and y_min >= 0 and 
-                            x_max < image_resolution[0] and 
-                            y_max < image_resolution[1] and
-                            width > 0 and height > 0):
-                            
-                            mask = np.zeros((height, width), dtype=np.float32)
-                            local_pts = pts.copy()
-                            local_pts[:, 0] -= x_min
-                            local_pts[:, 1] -= y_min
-                            cv2.fillConvexPoly(mask, local_pts, 1.0)
-                            
-                            # Actualizar solo la región relevante
-                            heatmap[y_min:y_min+height, x_min:x_min+width] += mask
-                            self.log_message(f"✅ Procesada: {os.path.basename(filename)} ({processed_count}/{total_files})")
-                        else:
-                            self.log_message(f"⚠️ Bbox inválido en {os.path.basename(filename)}: {bbox}")
-                    else:
-                        self.log_message(f"❌ Falló detección: {os.path.basename(filename)} ({processed_count}/{total_files})")
-        
-        self.log_message(f"📊 Resultados: {len(polygons_info)} imágenes procesadas, {processed_count - len(polygons_info)} fallos")
-        
-        if len(polygons_info) == 0:
+                    # Crear máscara temporal solo para esta imagen
+                    mask = np.zeros((image_resolution[1], image_resolution[0]), dtype=np.float32)
+                    cv2.fillConvexPoly(mask, pts, 1.0)
+                    heatmap += mask
+                    
+                    # Liberar memoria inmediatamente
+                    del mask
+                    if self.optimize_performance.get():
+                        gc.collect()
+                    
+                    with progress_lock:
+                        processed_count += 1
+                        current_progress = min(100, processed_count / total_files * 100)
+                        if hasattr(self, 'progress') and hasattr(self, 'root'):
+                            self.root.after(0, lambda p=current_progress: self.progress.config(value=p))
+                        self.log_message(f"✅ Procesada: {os.path.basename(filename)} ({processed_count}/{total_files})")
+
+        if processed_count == 0:
             return False, None, [], 0, 0
             
-        return True, heatmap, polygons_info, len(polygons_info), total_files
+        return True, heatmap, polygons_info, processed_count, total_files
 
     def open_heatmap_viewer(self, heatmap, polygons_info, camera_name, output_path, image_resolution):
         # Ejecutar en el hilo principal
