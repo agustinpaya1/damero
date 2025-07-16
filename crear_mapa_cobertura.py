@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import os
 import glob
-import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
@@ -11,28 +10,37 @@ from datetime import datetime
 import gc
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from PIL import Image, ImageTk  # Nuevas importaciones para manejar imágenes
+from PIL import Image, ImageTk
+import concurrent.futures
+import queue
+import math
 
 # --- CONFIGURACIÓN ---
 CHESSBOARD_SIZE = (10, 7)  # Esquinas interiores del damero
 IMAGE_RESOLUTION = (4096, 3000)
+MAX_WORKERS = 8  # Número máximo de hilos para procesamiento concurrente
+REDUCED_RESOLUTION = (1024, 768)  # Resolución reducida para procesamiento interno
 # --- FIN CONFIGURACIÓN ---
 
 class HeatmapViewer(tk.Toplevel):
-    def __init__(self, parent, initial_heatmap, masks, camera_name, output_path, image_resolution, show_plots=True):
+    def __init__(self, parent, initial_heatmap, polygons_info, camera_name, output_path, image_resolution, show_plots=True):
         super().__init__(parent)
         self.title(f"Mapa de Calor Interactivo - {camera_name}")
         self.geometry("1200x800")
         
         self.initial_heatmap = initial_heatmap
-        self.masks = masks
+        self.polygons_info = polygons_info  # (filename, polygon, bbox, centroid)
         self.camera_name = camera_name
         self.output_path = output_path
         self.image_resolution = image_resolution
         self.show_plots = show_plots
+        self.hover_info = None
+        self.hover_rect = None
+        self.hover_text = None
+        self.current_highlight = None
         
         # Estado de selección
-        self.selected = [True] * len(masks)
+        self.selected = [True] * len(polygons_info)
         self.current_heatmap = np.copy(initial_heatmap)
         
         self.setup_ui()
@@ -50,7 +58,18 @@ class HeatmapViewer(tk.Toplevel):
         self.fig = Figure(figsize=(8, 6))
         self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=img_frame)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.pack(fill=tk.BOTH, expand=True)
+        
+        # Configurar eventos de ratón
+        self.canvas.mpl_connect("motion_notify_event", self.on_hover)
+        self.canvas.mpl_connect("button_press_event", self.on_click)
+        
+        # Frame para información de hover
+        self.hover_frame = ttk.Frame(img_frame)
+        self.hover_frame.pack(fill=tk.X, pady=(5, 0))
+        self.hover_label = ttk.Label(self.hover_frame, text="Pase el ratón sobre el mapa para ver detalles", font=("Arial", 9))
+        self.hover_label.pack()
         
         # Actualizar imagen inicial
         self.update_heatmap_display()
@@ -86,6 +105,9 @@ class HeatmapViewer(tk.Toplevel):
         save_btn = ttk.Button(btn_frame, text="Guardar Mapa", command=self.save_heatmap)
         save_btn.pack(side=tk.LEFT, padx=(0,5))
         
+        save_selection_btn = ttk.Button(btn_frame, text="Guardar Selección", command=self.save_selected_images)
+        save_selection_btn.pack(side=tk.LEFT, padx=(0,5))
+
         close_btn = ttk.Button(btn_frame, text="Cerrar", command=self.destroy)
         close_btn.pack(side=tk.RIGHT)
         
@@ -93,19 +115,53 @@ class HeatmapViewer(tk.Toplevel):
         self.checkbox_frame.bind("<Configure>", self.on_frame_configure)
         self.checkbox_canvas.bind("<Configure>", self.on_canvas_configure)
         
-        # Crear checkboxes
+        # Crear checkboxes numeradas
         self.checkboxes = []
-        for i, (filename, _) in enumerate(self.masks):
+        for i, (filename, _, _, _) in enumerate(self.polygons_info):
             var = tk.BooleanVar(value=True)
+            
+            # Crear frame para cada elemento de la lista
+            item_frame = ttk.Frame(self.checkbox_frame)
+            item_frame.pack(fill=tk.X, padx=5, pady=2)
+            
+            # Número de imagen
+            num_label = ttk.Label(item_frame, text=f"{i+1}.", width=3, anchor=tk.E)
+            num_label.pack(side=tk.LEFT, padx=(0, 5))
+            
+            # Checkbox
             chk = ttk.Checkbutton(
-                self.checkbox_frame, 
+                item_frame, 
                 text=os.path.basename(filename), 
                 variable=var,
                 command=lambda idx=i: self.on_checkbox_change(idx)
             )
-            chk.pack(anchor=tk.W, padx=5, pady=2)
+            chk.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            
+            # Botón para resaltar esta imagen en el mapa
+            highlight_btn = ttk.Button(item_frame, text="🔍", width=2,
+                                     command=lambda idx=i: self.highlight_image(idx))
+            highlight_btn.pack(side=tk.RIGHT, padx=(5,0))
+            
             self.checkboxes.append(var)
             
+    def save_selected_images(self):
+        import shutil
+        from tkinter import messagebox
+
+        # Crear carpeta "seleccionadas" junto al output actual
+        out_dir = os.path.join(os.path.dirname(self.output_path), "seleccionadas")
+        os.makedirs(out_dir, exist_ok=True)
+
+        saved = 0
+        for i, selected in enumerate(self.checkboxes):
+            if selected.get():
+                image_path = self.polygons_info[i][0]  # ruta original de la imagen
+                dest_path = os.path.join(out_dir, os.path.basename(image_path))
+                shutil.copy(image_path, dest_path)
+                saved += 1
+
+        messagebox.showinfo("Guardado", f"{saved} imágenes guardadas en:\n{out_dir}")
+        
     def on_frame_configure(self, event):
         self.checkbox_canvas.configure(scrollregion=self.checkbox_canvas.bbox("all"))
         
@@ -115,24 +171,61 @@ class HeatmapViewer(tk.Toplevel):
             
     def on_checkbox_change(self, index):
         self.selected[index] = self.checkboxes[index].get()
-        self.update_heatmap()
+        self.update_heatmap(index)  # Pasar el índice como parámetro
         
-    def update_heatmap(self):
-        self.current_heatmap = np.zeros(self.initial_heatmap.shape, dtype=np.float32)
-        for i, selected in enumerate(self.selected):
-            if selected:
-                _, mask = self.masks[i]
+    # Añadir parámetro 'index' a la función
+    def update_heatmap(self, index):
+        # Actualizar solo el área afectada para mejorar rendimiento
+        _, polygon, bbox, _ = self.polygons_info[index]
+        
+        # Crear máscara solo para el área del bounding box
+        x_min, y_min, x_max, y_max = bbox
+        width = x_max - x_min + 1
+        height = y_max - y_min + 1
+        
+        # Si el área es demasiado grande, usar solo el polígono
+        if width * height > 1000000:  # 1M píxeles
+            mask = np.zeros(self.image_resolution[::-1], dtype=np.float32)
+            cv2.fillConvexPoly(mask, polygon, 1.0)
+            if self.selected[index]:
                 self.current_heatmap += mask
+            else:
+                self.current_heatmap -= mask
+        else:
+            # Crear máscara solo para el área del bounding box
+            local_mask = np.zeros((height, width), dtype=np.float32)
+            local_polygon = polygon.copy()
+            local_polygon[:, :, 0] -= x_min
+            local_polygon[:, :, 1] -= y_min
+            cv2.fillConvexPoly(local_mask, local_polygon, 1.0)
+            
+            # Actualizar solo la región relevante
+            if self.selected[index]:
+                self.current_heatmap[y_min:y_max+1, x_min:x_max+1] += local_mask
+            else:
+                self.current_heatmap[y_min:y_max+1, x_min:x_max+1] -= local_mask
+        
         self.update_heatmap_display()
         
     def update_heatmap_display(self):
         heatmap_normalized = cv2.normalize(self.current_heatmap, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
-        img_rgb = cv2.cvtColor(color_map, cv2.COLOR_BGR2RGB)
+        self.color_map_rgb = cv2.cvtColor(color_map, cv2.COLOR_BGR2RGB)
         
         self.ax.clear()
-        self.ax.imshow(img_rgb)
-        self.ax.set_title(f"Mapa de Calor - {self.camera_name}\n{np.count_nonzero(self.selected)}/{len(self.masks)} imágenes seleccionadas")
+        self.ax.imshow(self.color_map_rgb)
+        
+        # Mostrar números de imagen si hay menos de 50
+        if len(self.polygons_info) <= 50:
+            for i, (_, _, _, centroid) in enumerate(self.polygons_info):
+                if self.selected[i]:
+                    center_x, center_y = centroid
+                    self.ax.text(center_x, center_y, str(i+1), 
+                                color='white', fontsize=8, 
+                                ha='center', va='center',
+                                bbox=dict(facecolor='black', alpha=0.5, boxstyle='round,pad=0.2'))
+        
+        self.ax.set_title(f"Mapa de Calor - {self.camera_name}\n{np.count_nonzero(self.selected)}/{len(self.polygons_info)} imágenes seleccionadas")
         self.ax.axis('off')
         self.fig.tight_layout()
         self.canvas.draw()
@@ -142,10 +235,131 @@ class HeatmapViewer(tk.Toplevel):
         color_map = cv2.applyColorMap(heatmap_normalized, cv2.COLORMAP_JET)
         cv2.imwrite(self.output_path, color_map)
         messagebox.showinfo("Guardado", f"Mapa de calor guardado en:\n{self.output_path}")
+    
+    def highlight_image(self, index):
+        """Resalta una imagen específica en el mapa de calor"""
+        filename, polygon, _, centroid = self.polygons_info[index]
+        
+        # Crear una copia del mapa de calor actual
+        highlight_map = np.copy(self.color_map_rgb)
+        
+        # Crear máscara temporal para esta imagen
+        mask = np.zeros(self.image_resolution[::-1], dtype=np.uint8)
+        cv2.fillConvexPoly(mask, polygon, 1)
+        
+        # Encontrar contornos de la máscara
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Dibujar contorno rojo alrededor del área
+        cv2.drawContours(highlight_map, contours, -1, (255, 0, 0), 20)
+        
+        # Actualizar la visualización
+        self.ax.clear()
+        self.ax.imshow(highlight_map)
+        
+        # Mostrar información
+        self.ax.set_title(f"Imagen resaltada: #{index+1} - {os.path.basename(filename)}")
+        self.ax.axis('off')
+        self.fig.tight_layout()
+        self.canvas.draw()
+        
+        # Guardar referencia para poder quitarlo
+        self.current_highlight = index
+        
+        # Configurar para volver al mapa completo después de 3 segundos
+        self.after(3000, self.remove_highlight)
+    
+    def remove_highlight(self):
+        """Vuelve a mostrar el mapa de calor completo"""
+        if self.current_highlight is not None:
+            self.update_heatmap_display()
+            self.current_highlight = None
+    
+    def on_hover(self, event):
+        """Muestra información cuando el ratón pasa sobre una imagen en el mapa"""
+        if event.inaxes == self.ax:
+            x, y = int(event.xdata), int(event.ydata)
+            
+            # Buscar qué imágenes cubren este píxel
+            covering_images = []
+            for i, (filename, polygon, bbox, _) in enumerate(self.polygons_info):
+                if self.selected[i]:
+                    # Primero verificar el bounding box para optimización
+                    x_min, y_min, x_max, y_max = bbox
+                    if x_min <= x <= x_max and y_min <= y <= y_max:
+                        # Luego verificar el polígono
+                        if cv2.pointPolygonTest(polygon, (x, y), False) >= 0:
+                            covering_images.append((i+1, filename))
+            
+            if covering_images:
+                # Crear texto informativo
+                if len(covering_images) == 1:
+                    img_num, filename = covering_images[0]
+                    text = f"Imagen #{img_num}: {os.path.basename(filename)}"
+                else:
+                    nums = ", ".join([f"#{num}" for num, _ in covering_images[:3]])
+                    if len(covering_images) > 3:
+                        nums += f" y {len(covering_images)-3} más"
+                    text = f"Píxel cubierto por: {nums}"
+                
+                self.hover_label.config(text=text)
+            else:
+                self.hover_label.config(text="Pase el ratón sobre un área cubierta para ver detalles")
+    
+    def on_click(self, event):
+        """Muestra la imagen completa cuando se hace clic en un área del mapa"""
+        if event.inaxes == self.ax and event.button == 1:  # Botón izquierdo
+            x, y = int(event.xdata), int(event.ydata)
+            
+            # Buscar la primera imagen que cubre este píxel
+            for i, (filename, polygon, bbox, _) in enumerate(self.polygons_info):
+                if self.selected[i]:
+                    # Primero verificar el bounding box para optimización
+                    x_min, y_min, x_max, y_max = bbox
+                    if x_min <= x <= x_max and y_min <= y <= y_max:
+                        # Luego verificar el polígono
+                        if cv2.pointPolygonTest(polygon, (x, y), False) >= 0:
+                            self.show_full_image(filename, i+1)
+                            break
+    
+    def show_full_image(self, image_path, image_num):
+        """Muestra la imagen original en una nueva ventana"""
+        img = cv2.imread(image_path)
+        if img is not None:
+            # Convertir a RGB para visualización
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            
+            # Crear ventana para mostrar la imagen
+            img_window = tk.Toplevel(self)
+            img_window.title(f"Imagen #{image_num}: {os.path.basename(image_path)}")
+            
+            # Redimensionar si es muy grande
+            max_size = (800, 600)
+            height, width = img_rgb.shape[:2]
+            if width > max_size[0] or height > max_size[1]:
+                scale = min(max_size[0]/width, max_size[1]/height)
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                img_resized = cv2.resize(img_rgb, (new_width, new_height))
+            else:
+                img_resized = img_rgb
+            
+            # Convertir a formato Tkinter
+            img_pil = Image.fromarray(img_resized)
+            img_tk = ImageTk.PhotoImage(image=img_pil)
+            
+            # Mostrar imagen
+            label = ttk.Label(img_window, image=img_tk)
+            label.image = img_tk  # Mantener referencia
+            label.pack(padx=10, pady=10)
+            
+            # Botón de cierre
+            close_btn = ttk.Button(img_window, text="Cerrar", command=img_window.destroy)
+            close_btn.pack(pady=(0, 10))
 
 
 class HeatmapGallery(tk.Toplevel):
-    """Nueva clase para mostrar una galería de miniaturas de mapas de calor"""
+    """Clase para mostrar una galería de miniaturas de mapas de calor"""
     def __init__(self, parent, gallery_items, image_resolution, show_plots):
         super().__init__(parent)
         self.title("Galería de Mapas de Calor")
@@ -183,8 +397,8 @@ class HeatmapGallery(tk.Toplevel):
             frame = ttk.Frame(scrollable_frame, padding=10, relief="groove", borderwidth=1)
             frame.grid(row=row, column=col, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=10)
             
-            # Título
-            label = ttk.Label(frame, text=item['camera_name'], font=('Arial', 10, 'bold'))
+            # Título con número de cámara
+            label = ttk.Label(frame, text=f"Cámara #{i+1}: {item['camera_name']}", font=('Arial', 10, 'bold'))
             label.pack(pady=(0, 5))
             
             # Generar miniatura
@@ -197,16 +411,16 @@ class HeatmapGallery(tk.Toplevel):
             img_tk = self.convert_to_tk(preview)
             
             # Mostrar miniatura
-            img_label = ttk.Label(frame, image=img_tk)
+            img_label = ttk.Label(frame, image=img_tk,cursor="hand2")
             img_label.image = img_tk  # mantener referencia
             img_label.pack()
             
+            # Hacer clic sobre la miniatura para abrir visor
+            img_label.bind("<Double-Button-1>", lambda e, item=item: self.open_heatmap_viewer(item))
+        
             # Texto informativo
             info_label = ttk.Label(frame, text=f"{item['processed_count']}/{item['total_files']} imágenes")
             info_label.pack(pady=(5, 0))
-            
-            # Asignar evento de doble clic
-            img_label.bind("<Double-Button-1>", lambda e, item=item: self.open_heatmap_viewer(item))
     
     def convert_to_tk(self, img_rgb):
         """Convierte una imagen RGB a formato Tkinter"""
@@ -219,7 +433,7 @@ class HeatmapGallery(tk.Toplevel):
         HeatmapViewer(
             self.master, 
             item['heatmap'], 
-            item['masks'], 
+            item['polygons_info'], 
             item['camera_name'], 
             item['output_path'], 
             self.image_resolution, 
@@ -231,7 +445,7 @@ class HeatmapApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Generador de Mapa de Calor - Calibración Multi-Cámara")
-        self.root.geometry("800x600")
+        self.root.geometry("1000x800")
         
         # Variables
         self.selected_folder = tk.StringVar()
@@ -515,12 +729,24 @@ class HeatmapApp:
             self.generate_btn.config(state='disabled')
     
     def find_images_in_folder(self, folder):
-        image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']
-        image_files = []
-        for ext in image_extensions:
-            image_files.extend(glob.glob(os.path.join(folder, ext)))
-            image_files.extend(glob.glob(os.path.join(folder, ext.upper())))
-        return image_files
+            image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']
+            image_files = []
+            for ext in image_extensions:
+                image_files.extend(glob.glob(os.path.join(folder, ext)))
+                image_files.extend(glob.glob(os.path.join(folder, ext.upper())))
+            
+            # Eliminar duplicados usando rutas reales normalizadas
+            unique_files = set()
+            result = []
+            for file_path in image_files:
+                # Obtener la ruta real (resuelve enlaces simbólicos)
+                real_path = os.path.realpath(file_path)
+                # Normalizar la ruta para comparación consistente
+                normalized_path = os.path.normcase(real_path)
+                if normalized_path not in unique_files:
+                    unique_files.add(normalized_path)
+                    result.append(file_path)
+            return result
     
     def log_message(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -592,7 +818,7 @@ class HeatmapApp:
         
         output_path = os.path.join(os.path.dirname(folder), f"mapa_calor_{os.path.basename(folder)}.png")
         
-        success, heatmap, masks, processed_count, total_files = self.crear_mapa_de_cobertura(
+        success, heatmap, polygons_info, processed_count, total_files = self.crear_mapa_de_cobertura(
             folder, chess_size, img_resolution, output_path, "Cámara única"
         )
         
@@ -603,7 +829,7 @@ class HeatmapApp:
             cv2.imwrite(output_path, color_map)
             
             # Abrir visor interactivo
-            self.open_heatmap_viewer(heatmap, masks, "Cámara única", output_path, img_resolution)
+            self.open_heatmap_viewer(heatmap, polygons_info, "Cámara única", output_path, img_resolution)
             
             self.log_message(f"✅ Mapa de calor generado: {output_path}")
         else:
@@ -640,7 +866,7 @@ class HeatmapApp:
             # Generar nombre de archivo de salida
             output_path = os.path.join(folder, f"mapa_calor_{camera_name}.png")
             
-            success, heatmap, masks, processed_count, total_files = self.crear_mapa_de_cobertura(
+            success, heatmap, polygons_info, processed_count, total_files = self.crear_mapa_de_cobertura(
                 camera_path, chess_size, img_resolution, output_path, camera_name
             )
             
@@ -654,7 +880,7 @@ class HeatmapApp:
                 gallery_items.append({
                     'camera_name': camera_name,
                     'heatmap': heatmap,
-                    'masks': masks,
+                    'polygons_info': polygons_info,
                     'output_path': output_path,
                     'processed_count': processed_count,
                     'total_files': total_files
@@ -689,91 +915,113 @@ class HeatmapApp:
     
     def crear_mapa_de_cobertura(self, images_path, chessboard_size, image_resolution, output_path, camera_name):
         heatmap = np.zeros((image_resolution[1], image_resolution[0]), dtype=np.float32)
-        masks = []  # Lista para guardar tuplas (filename, mask)
-        
+        polygons_info = []  # (filename, polygon, bbox, centroid)
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
         
         image_files = self.find_images_in_folder(images_path)
-        
+        total_files = len(image_files)
         if not image_files:
             return False, None, [], 0, 0
         
         processed_count = 0
-        total_files = len(image_files)
+        progress_lock = threading.Lock()  # Para actualizar progress de manera segura
         
-        # Optimización: procesar en lotes para mejor rendimiento
-        batch_size = 10
-        
-        for i in range(0, len(image_files), batch_size):
+        def procesar_imagen(filename):
             if self.cancel_processing_flag:
-                break
+                return None
                 
-            # Procesar lote
-            batch_files = image_files[i:i + batch_size]
+            img = cv2.imread(filename)
+            if img is None:
+                return None
             
-            for filename in batch_files:
+            # Reducir la imagen para procesamiento
+            original_height, original_width = img.shape[:2]
+            scale_factor = min(REDUCED_RESOLUTION[0]/original_width, REDUCED_RESOLUTION[1]/original_height)
+            new_width = int(original_width * scale_factor)
+            new_height = int(original_height * scale_factor)
+            img_resized = cv2.resize(img, (new_width, new_height))
+            
+            gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
+            flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
+            ret, corners = cv2.findChessboardCorners(gray, chessboard_size, flags=flags)
+            
+            if not ret:
+                return None
+            
+            corners_subpix = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            
+            # Obtener las esquinas del tablero
+            top_left = corners_subpix[0][0]
+            top_right = corners_subpix[chessboard_size[0] - 1][0]
+            bottom_right = corners_subpix[-1][0]
+            bottom_left = corners_subpix[-chessboard_size[0]][0]
+            
+            # Escalar de vuelta a la resolución original
+            scale_back_x = original_width / new_width
+            scale_back_y = original_height / new_height
+            top_left = (top_left[0] * scale_back_x, top_left[1] * scale_back_y)
+            top_right = (top_right[0] * scale_back_x, top_right[1] * scale_back_y)
+            bottom_right = (bottom_right[0] * scale_back_x, bottom_right[1] * scale_back_y)
+            bottom_left = (bottom_left[0] * scale_back_x, bottom_left[1] * scale_back_y)
+            
+            # Crear polígono
+            pts = np.array([top_left, top_right, bottom_right, bottom_left], np.int32).reshape((-1, 1, 2))
+            
+            # Calcular bounding box
+            x_coords = pts[:,0,0]
+            y_coords = pts[:,0,1]
+            bbox = (int(min(x_coords)), int(min(y_coords)), int(max(x_coords)), int(max(y_coords)))
+            
+            # Calcular centroide
+            centroid = (int(np.mean(x_coords)), int(np.mean(y_coords)))
+            
+            # Liberar memoria
+            del img, img_resized, gray
+            if self.optimize_performance.get():
+                gc.collect()
+                
+            return filename, pts, bbox, centroid
+
+        # Usar ThreadPoolExecutor para procesamiento concurrente
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(procesar_imagen, f): f for f in image_files}
+            
+            for future in concurrent.futures.as_completed(futures):
                 if self.cancel_processing_flag:
+                    executor.shutdown(wait=False, cancel_futures=True)
                     break
                     
-                img = cv2.imread(filename)
-                if img is None:
-                    continue
-                
-                # Redimensionar imagen si es muy grande para mejorar rendimiento
-                height, width = img.shape[:2]
-                if width > 2048 or height > 2048:
-                    scale = min(2048/width, 2048/height)
-                    new_width = int(width * scale)
-                    new_height = int(height * scale)
-                    img = cv2.resize(img, (new_width, new_height))
-                
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
-                ret, corners = cv2.findChessboardCorners(gray, chessboard_size, flags=flags)
-                
-                if ret:
-                    corners_subpix = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+                result = future.result()
+                if result:
+                    filename, pts, bbox, centroid = result
+                    polygons_info.append((filename, pts, bbox, centroid))
                     
-                    # Escalar coordenadas de vuelta si redimensionamos
-                    if width > 2048 or height > 2048:
-                        scale_back = max(width/2048, height/2048)
-                        corners_subpix = corners_subpix * scale_back
-                    
-                    top_left = corners_subpix[0][0]
-                    top_right = corners_subpix[chessboard_size[0] - 1][0]
-                    bottom_right = corners_subpix[-1][0]
-                    bottom_left = corners_subpix[-chessboard_size[0]][0]
-                    
-                    pts = np.array([top_left, top_right, bottom_right, bottom_left], np.int32).reshape((-1, 1, 2))
-                    
-                    # Crear máscara individual
+                    # Crear máscara temporal solo para esta imagen
                     mask = np.zeros((image_resolution[1], image_resolution[0]), dtype=np.float32)
                     cv2.fillConvexPoly(mask, pts, 1.0)
-                    
-                    # Acumular en el heatmap total
                     heatmap += mask
-                    masks.append((filename, mask))
-                    processed_count += 1
-                
-                # Liberar memoria
-                del img, gray
-                if self.optimize_performance.get():
-                    gc.collect()  # Forzar garbage collection periódicamente
-            
-            # Actualizar progreso cada lote
-            if hasattr(self, 'progress') and total_files > 0:
-                current_progress = min(100, (i + batch_size) / total_files * 100)
-                self.root.after(0, lambda p=current_progress: self.progress.config(value=p))
-        
+                    
+                    # Liberar memoria inmediatamente
+                    del mask
+                    if self.optimize_performance.get():
+                        gc.collect()
+                    
+                    with progress_lock:
+                        processed_count += 1
+                        current_progress = min(100, processed_count / total_files * 100)
+                        if hasattr(self, 'progress') and hasattr(self, 'root'):
+                            self.root.after(0, lambda p=current_progress: self.progress.config(value=p))
+                        self.log_message(f"✅ Procesada: {os.path.basename(filename)} ({processed_count}/{total_files})")
+
         if processed_count == 0:
             return False, None, [], 0, 0
-        
-        return True, heatmap, masks, processed_count, total_files
-    
-    def open_heatmap_viewer(self, heatmap, masks, camera_name, output_path, image_resolution):
+            
+        return True, heatmap, polygons_info, processed_count, total_files
+
+    def open_heatmap_viewer(self, heatmap, polygons_info, camera_name, output_path, image_resolution):
         # Ejecutar en el hilo principal
         self.root.after(0, lambda: HeatmapViewer(
-            self.root, heatmap, masks, camera_name, output_path, image_resolution, self.show_plots.get()
+            self.root, heatmap, polygons_info, camera_name, output_path, image_resolution, self.show_plots.get()
         ))
     
     def add_to_history(self, folder):
