@@ -941,8 +941,11 @@ class HeatmapApp:
             new_height = int(original_height * scale_factor)
             img_resized = cv2.resize(img, (new_width, new_height))
             
+            # Modificaciones propuestas
             gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
-            flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK
+            gray = cv2.GaussianBlur(gray, (5,5), 0)
+            flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_FAST_CHECK
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.0001)
             ret, corners = cv2.findChessboardCorners(gray, chessboard_size, flags=flags)
             
             if not ret:
