@@ -3,7 +3,10 @@ import numpy as np
 import os
 import glob
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from ttkbootstrap.scrolled import ScrolledFrame
 from pathlib import Path
 import threading
 from datetime import datetime
@@ -22,11 +25,14 @@ MAX_WORKERS = 8  # Número máximo de hilos para procesamiento concurrente
 REDUCED_RESOLUTION = (1024, 768)  # Resolución reducida para procesamiento interno
 # --- FIN CONFIGURACIÓN ---
 
-class HeatmapViewer(tk.Toplevel):
+class HeatmapViewer(ttk.Toplevel):
     def __init__(self, parent, initial_heatmap, polygons_info, camera_name, output_path, image_resolution, show_plots=True):
         super().__init__(parent)
         self.title(f"Mapa de Calor Interactivo - {camera_name}")
         self.geometry("1200x800")
+        
+        # Configurar tema y estilo
+        self.style = ttk.Style()
         
         self.initial_heatmap = initial_heatmap
         self.polygons_info = polygons_info  # (filename, polygon, bbox, centroid)
@@ -65,81 +71,113 @@ class HeatmapViewer(tk.Toplevel):
         self.canvas.mpl_connect("motion_notify_event", self.on_hover)
         self.canvas.mpl_connect("button_press_event", self.on_click)
         
-        # Frame para información de hover
-        self.hover_frame = ttk.Frame(img_frame)
+        # Frame para información de hover con estilo mejorado
+        self.hover_frame = ttk.Frame(img_frame, bootstyle="info")
         self.hover_frame.pack(fill=tk.X, pady=(5, 0))
-        self.hover_label = ttk.Label(self.hover_frame, text="Pase el ratón sobre el mapa para ver detalles", font=("Arial", 9))
-        self.hover_label.pack()
+        
+        self.hover_label = ttk.Label(
+            self.hover_frame, 
+            text="🔍 Pase el ratón sobre el mapa para ver detalles", 
+            font=("Arial", 9, "italic"),
+            bootstyle="inverse-info",
+            anchor="center"
+        )
+        self.hover_label.pack(fill=tk.X, ipady=3)
         
         # Actualizar imagen inicial
         self.update_heatmap_display()
         
-        # Panel lateral
-        side_frame = ttk.Frame(main_frame, width=300)
+        # Panel lateral con estilo mejorado
+        side_frame = ttk.Frame(main_frame, width=300, bootstyle="secondary")
         side_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10,0))
         
-        # Título
-        ttk.Label(side_frame, text="Imágenes Procesadas", font=('Arial', 12, 'bold')).pack(pady=(0,10))
+        # Título con estilo mejorado
+        title_frame = ttk.Frame(side_frame, bootstyle="primary")
+        title_frame.pack(fill=tk.X)
         
-        # Frame para la lista de checkboxes con scrollbar
-        list_container = ttk.Frame(side_frame)
-        list_container.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(
+            title_frame, 
+            text="Imágenes Procesadas", 
+            font=('Arial', 12, 'bold'),
+            bootstyle="inverse-primary",
+            anchor="center"
+        ).pack(fill=tk.X, ipady=5)
         
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(list_container)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Usar ScrolledFrame de ttkbootstrap para mejor apariencia
+        list_container = ScrolledFrame(side_frame, autohide=True, bootstyle="round")
+        list_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Canvas para las checkboxes
-        self.checkbox_canvas = tk.Canvas(list_container, yscrollcommand=scrollbar.set)
-        self.checkbox_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.checkbox_canvas.yview)
+        # Frame para las checkboxes (ya incluido en ScrolledFrame)
+        self.checkbox_frame = list_container
         
-        # Frame dentro del canvas para las checkboxes
-        self.checkbox_frame = ttk.Frame(self.checkbox_canvas)
-        self.checkbox_canvas_window = self.checkbox_canvas.create_window((0,0), window=self.checkbox_frame, anchor=tk.NW)
-        
-        # Botones
+        # Botones con estilo mejorado
         btn_frame = ttk.Frame(side_frame)
         btn_frame.pack(fill=tk.X, pady=(10,0))
         
-        save_btn = ttk.Button(btn_frame, text="Guardar Mapa", command=self.save_heatmap)
+        save_btn = ttk.Button(
+            btn_frame, 
+            text="💾 Guardar Mapa", 
+            command=self.save_heatmap,
+            bootstyle="success",
+            width=15
+        )
         save_btn.pack(side=tk.LEFT, padx=(0,5))
         
-        save_selection_btn = ttk.Button(btn_frame, text="Guardar Selección", command=self.save_selected_images)
+        save_selection_btn = ttk.Button(
+            btn_frame, 
+            text="📋 Guardar Selección", 
+            command=self.save_selected_images,
+            bootstyle="info",
+            width=18
+        )
         save_selection_btn.pack(side=tk.LEFT, padx=(0,5))
 
-        close_btn = ttk.Button(btn_frame, text="Cerrar", command=self.destroy)
+        close_btn = ttk.Button(
+            btn_frame, 
+            text="❌ Cerrar", 
+            command=self.destroy,
+            bootstyle="danger-outline",
+            width=10
+        )
         close_btn.pack(side=tk.RIGHT)
         
-        # Configurar eventos
-        self.checkbox_frame.bind("<Configure>", self.on_frame_configure)
-        self.checkbox_canvas.bind("<Configure>", self.on_canvas_configure)
-        
-        # Crear checkboxes numeradas
+        # Crear checkboxes numeradas con estilo mejorado
         self.checkboxes = []
         for i, (filename, _, _, _) in enumerate(self.polygons_info):
             var = tk.BooleanVar(value=True)
             
             # Crear frame para cada elemento de la lista
             item_frame = ttk.Frame(self.checkbox_frame)
-            item_frame.pack(fill=tk.X, padx=5, pady=2)
+            item_frame.pack(fill=tk.X, padx=5, pady=3)
             
-            # Número de imagen
-            num_label = ttk.Label(item_frame, text=f"{i+1}.", width=3, anchor=tk.E)
+            # Número de imagen con estilo
+            num_label = ttk.Label(
+                item_frame, 
+                text=f"{i+1}.", 
+                width=3, 
+                anchor=tk.E,
+                bootstyle="secondary"
+            )
             num_label.pack(side=tk.LEFT, padx=(0, 5))
             
-            # Checkbox
+            # Checkbox con estilo mejorado
             chk = ttk.Checkbutton(
                 item_frame, 
                 text=os.path.basename(filename), 
                 variable=var,
-                command=lambda idx=i: self.on_checkbox_change(idx)
+                command=lambda idx=i: self.on_checkbox_change(idx),
+                bootstyle="round-toggle"
             )
             chk.pack(side=tk.LEFT, fill=tk.X, expand=True)
             
             # Botón para resaltar esta imagen en el mapa
-            highlight_btn = ttk.Button(item_frame, text="🔍", width=2,
-                                     command=lambda idx=i: self.highlight_image(idx))
+            highlight_btn = ttk.Button(
+                item_frame, 
+                text="🔍", 
+                width=2,
+                command=lambda idx=i: self.highlight_image(idx),
+                bootstyle="info-outline"
+            )
             highlight_btn.pack(side=tk.RIGHT, padx=(5,0))
             
             self.checkboxes.append(var)
@@ -162,12 +200,8 @@ class HeatmapViewer(tk.Toplevel):
 
         messagebox.showinfo("Guardado", f"{saved} imágenes guardadas en:\n{out_dir}")
         
-    def on_frame_configure(self, event):
-        self.checkbox_canvas.configure(scrollregion=self.checkbox_canvas.bbox("all"))
-        
-    def on_canvas_configure(self, event):
-        canvas_width = event.width
-        self.checkbox_canvas.itemconfig(self.checkbox_canvas_window, width=canvas_width)
+    # Los métodos on_frame_configure y on_canvas_configure ya no son necesarios
+    # con el ScrolledFrame de ttkbootstrap
             
     def on_checkbox_change(self, index):
         self.selected[index] = self.checkboxes[index].get()
@@ -292,19 +326,28 @@ class HeatmapViewer(tk.Toplevel):
                             covering_images.append((i+1, filename))
             
             if covering_images:
-                # Crear texto informativo
+                # Crear texto informativo con emojis y mejor formato
                 if len(covering_images) == 1:
                     img_num, filename = covering_images[0]
-                    text = f"Imagen #{img_num}: {os.path.basename(filename)}"
+                    text = f"📸 Imagen #{img_num}: {os.path.basename(filename)}"
+                    # Actualizar estilo para una sola imagen
+                    self.hover_frame.configure(bootstyle="success")
+                    self.hover_label.configure(bootstyle="inverse-success")
                 else:
                     nums = ", ".join([f"#{num}" for num, _ in covering_images[:3]])
                     if len(covering_images) > 3:
                         nums += f" y {len(covering_images)-3} más"
-                    text = f"Píxel cubierto por: {nums}"
+                    text = f"🔍 Superposición: {nums} ({len(covering_images)} imágenes)"
+                    # Actualizar estilo para múltiples imágenes
+                    self.hover_frame.configure(bootstyle="warning")
+                    self.hover_label.configure(bootstyle="inverse-warning")
                 
                 self.hover_label.config(text=text)
             else:
-                self.hover_label.config(text="Pase el ratón sobre un área cubierta para ver detalles")
+                # Restaurar estilo por defecto
+                self.hover_frame.configure(bootstyle="info")
+                self.hover_label.configure(bootstyle="inverse-info")
+                self.hover_label.config(text="🔍 Pase el ratón sobre un área cubierta para ver detalles")
     
     def on_click(self, event):
         """Muestra la imagen completa cuando se hace clic en un área del mapa"""
@@ -323,15 +366,18 @@ class HeatmapViewer(tk.Toplevel):
                             break
     
     def show_full_image(self, image_path, image_num):
-        """Muestra la imagen original en una nueva ventana"""
+        """Muestra la imagen original en una nueva ventana con estilo mejorado"""
         img = cv2.imread(image_path)
         if img is not None:
             # Convertir a RGB para visualización
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             
-            # Crear ventana para mostrar la imagen
-            img_window = tk.Toplevel(self)
+            # Crear ventana para mostrar la imagen con estilo ttkbootstrap
+            img_window = ttk.Toplevel(self)
             img_window.title(f"Imagen #{image_num}: {os.path.basename(image_path)}")
+            
+            # Configurar tema y estilo
+            img_window.style = ttk.Style()
             
             # Redimensionar si es muy grande
             max_size = (800, 600)
@@ -348,58 +394,125 @@ class HeatmapViewer(tk.Toplevel):
             img_pil = Image.fromarray(img_resized)
             img_tk = ImageTk.PhotoImage(image=img_pil)
             
+            # Título con información de la imagen
+            header_frame = ttk.Frame(img_window, bootstyle="primary")
+            header_frame.pack(fill=tk.X)
+            
+            title_label = ttk.Label(
+                header_frame,
+                text=f"📸 Imagen #{image_num}: {os.path.basename(image_path)}",
+                font=("Arial", 12, "bold"),
+                bootstyle="inverse-primary",
+                anchor="center"
+            )
+            title_label.pack(fill=tk.X, ipady=5)
+            
+            # Contenedor principal
+            main_frame = ttk.Frame(img_window, padding=10)
+            main_frame.pack(fill=tk.BOTH, expand=True)
+            
             # Mostrar imagen
-            label = ttk.Label(img_window, image=img_tk)
+            label = ttk.Label(main_frame, image=img_tk)
             label.image = img_tk  # Mantener referencia
             label.pack(padx=10, pady=10)
             
+            # Información adicional
+            info_frame = ttk.Frame(main_frame, bootstyle="secondary")
+            info_frame.pack(fill=tk.X, pady=(10, 0))
+            
+            # Mostrar dimensiones de la imagen
+            info_label = ttk.Label(
+                info_frame,
+                text=f"Dimensiones: {width}x{height} píxeles",
+                bootstyle="secondary",
+                font=("Arial", 9)
+            )
+            info_label.pack(side=tk.LEFT, padx=10, pady=5)
+            
             # Botón de cierre
-            close_btn = ttk.Button(img_window, text="Cerrar", command=img_window.destroy)
-            close_btn.pack(pady=(0, 10))
+            close_btn = ttk.Button(
+                main_frame, 
+                text="❌ Cerrar", 
+                command=img_window.destroy,
+                bootstyle="danger-outline",
+                width=10
+            )
+            close_btn.pack(pady=(10, 0))
+            
+            # Hacer que la ventana sea modal
+            img_window.transient(self)
+            img_window.grab_set()
+            img_window.focus_set()
 
 
-class HeatmapGallery(tk.Toplevel):
+class HeatmapGallery(ttk.Toplevel):
     """Clase para mostrar una galería de miniaturas de mapas de calor"""
     def __init__(self, parent, gallery_items, image_resolution, show_plots):
         super().__init__(parent)
         self.title("Galería de Mapas de Calor")
         self.geometry("1200x800")
+        
+        # Configurar tema y estilo
+        self.style = ttk.Style()
+        
         self.gallery_items = gallery_items
         self.image_resolution = image_resolution
         self.show_plots = show_plots
         self.setup_ui()
 
     def setup_ui(self):
-        main_frame = ttk.Frame(self)
+        # Título principal
+        header_frame = ttk.Frame(self, bootstyle="primary")
+        header_frame.pack(fill=tk.X, padx=10, pady=(10, 20))
+        
+        title_label = ttk.Label(
+            header_frame, 
+            text="Galería de Mapas de Calor", 
+            font=("Arial", 16, "bold"),
+            bootstyle="inverse-primary",
+            anchor="center"
+        )
+        title_label.pack(fill=tk.X, ipady=10)
+        
+        # Usar ScrolledFrame de ttkbootstrap para mejor apariencia
+        main_frame = ScrolledFrame(self, autohide=True, bootstyle="round")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Canvas con scroll
-        canvas = tk.Canvas(main_frame)
-        scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Contenedor para las tarjetas
+        gallery_frame = ttk.Frame(main_frame)
+        gallery_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Crear una cuadrícula de 3 columnas
         cols = 3
         for i, item in enumerate(self.gallery_items):
             row = i // cols
             col = i % cols
-            frame = ttk.Frame(scrollable_frame, padding=10, relief="groove", borderwidth=1)
+            
+            # Crear tarjeta con estilo moderno
+            frame = ttk.Frame(gallery_frame, bootstyle="default")
             frame.grid(row=row, column=col, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=10)
             
+            # Contenedor interno con borde
+            card = ttk.Frame(frame, bootstyle="default")
+            card.pack(fill=tk.BOTH, expand=True)
+            
+            # Encabezado de la tarjeta
+            header = ttk.Frame(card, bootstyle="primary")
+            header.pack(fill=tk.X)
+            
             # Título con número de cámara
-            label = ttk.Label(frame, text=f"Cámara #{i+1}: {item['camera_name']}", font=('Arial', 10, 'bold'))
-            label.pack(pady=(0, 5))
+            label = ttk.Label(
+                header, 
+                text=f"Cámara #{i+1}: {item['camera_name']}", 
+                font=('Arial', 10, 'bold'),
+                bootstyle="inverse-primary",
+                anchor="center"
+            )
+            label.pack(fill=tk.X, ipady=5)
+            
+            # Contenido de la tarjeta
+            content = ttk.Frame(card, padding=10)
+            content.pack(fill=tk.BOTH, expand=True)
             
             # Generar miniatura
             heatmap_normalized = cv2.normalize(item['heatmap'], None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
@@ -411,16 +524,33 @@ class HeatmapGallery(tk.Toplevel):
             img_tk = self.convert_to_tk(preview)
             
             # Mostrar miniatura
-            img_label = ttk.Label(frame, image=img_tk,cursor="hand2")
+            img_label = ttk.Label(content, image=img_tk, cursor="hand2")
             img_label.image = img_tk  # mantener referencia
-            img_label.pack()
+            img_label.pack(pady=5)
             
             # Hacer clic sobre la miniatura para abrir visor
             img_label.bind("<Double-Button-1>", lambda e, item=item: self.open_heatmap_viewer(item))
         
             # Texto informativo
-            info_label = ttk.Label(frame, text=f"{item['processed_count']}/{item['total_files']} imágenes")
-            info_label.pack(pady=(5, 0))
+            info_frame = ttk.Frame(content)
+            info_frame.pack(fill=tk.X, pady=(5, 0))
+            
+            info_label = ttk.Label(
+                info_frame, 
+                text=f"{item['processed_count']}/{item['total_files']} imágenes",
+                bootstyle="secondary"
+            )
+            info_label.pack(side=tk.LEFT)
+            
+            # Botón para abrir
+            open_btn = ttk.Button(
+                info_frame, 
+                text="Abrir", 
+                command=lambda item=item: self.open_heatmap_viewer(item),
+                bootstyle="info-outline",
+                width=8
+            )
+            open_btn.pack(side=tk.RIGHT)
     
     def convert_to_tk(self, img_rgb):
         """Convierte una imagen RGB a formato Tkinter"""
@@ -430,7 +560,8 @@ class HeatmapGallery(tk.Toplevel):
     
     def open_heatmap_viewer(self, item):
         """Abre el visor interactivo para el mapa seleccionado"""
-        HeatmapViewer(
+        # Crear y mostrar el visor de mapa de calor con estilo ttkbootstrap
+        viewer = HeatmapViewer(
             self.master, 
             item['heatmap'], 
             item['polygons_info'], 
@@ -439,10 +570,17 @@ class HeatmapGallery(tk.Toplevel):
             self.image_resolution, 
             self.show_plots
         )
+        
+        # Asegurar que la ventana sea modal
+        viewer.transient(self)
+        viewer.grab_set()
+        viewer.focus_set()
 
 
 class HeatmapApp:
     def __init__(self, root):
+        
+        # Configurar el tema de ttkbootstrap
         self.root = root
         self.root.title("Generador de Mapa de Calor - Calibración Multi-Cámara")
         self.root.geometry("1000x800")
@@ -454,149 +592,270 @@ class HeatmapApp:
         self.camera_folders = []
         
         # Cargar historial de carpetas
+        self.setup_ui()
         self.load_folder_history()
         
-        self.setup_ui()
+        
         
     def setup_ui(self):
         # Frame principal
         main_frame = ttk.Frame(self.root, padding="20")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # Título
-        title_label = ttk.Label(main_frame, text="Generador de Mapa de Calor Multi-Cámara", 
-                               font=("Arial", 16, "bold"))
-        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        # Título con estilo mejorado
+        title_frame = ttk.Frame(main_frame, bootstyle="primary")
+        title_frame.grid(row=0, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20))
+        title_frame.columnconfigure(0, weight=1)
         
-        # Modo de procesamiento
-        mode_frame = ttk.LabelFrame(main_frame, text="Modo de Procesamiento", padding="10")
+        title_label = ttk.Label(
+            title_frame, 
+            text="Generador de Mapa de Calor Multi-Cámara", 
+            font=("Arial", 18, "bold"),
+            bootstyle="success-inverse",
+            anchor="center"
+        )
+        title_label.grid(row=0, column=0, sticky=(tk.W, tk.E), ipady=10)
+        
+        # Modo de procesamiento con estilo mejorado
+        mode_frame = ttk.LabelFrame(main_frame, text="Modo de Procesamiento", 
+                                  padding="15", bootstyle="success")
         mode_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20))
         
-        ttk.Radiobutton(mode_frame, text="Carpeta única (una cámara)", 
-                       variable=self.processing_mode, value="single",
-                       command=self.on_mode_change).grid(row=0, column=0, sticky=tk.W, padx=(0, 20))
+        # Contenedor para los radiobuttons
+        radio_container = ttk.Frame(mode_frame)
+        radio_container.pack(fill=tk.X, padx=10, pady=10)
         
-        ttk.Radiobutton(mode_frame, text="Carpeta con subcarpetas (múltiples cámaras)", 
-                       variable=self.processing_mode, value="multi",
-                       command=self.on_mode_change).grid(row=0, column=1, sticky=tk.W)
+        # Radiobuttons con estilo mejorado
+        single_radio = ttk.Radiobutton(
+            radio_container, 
+            text="Carpeta única (una cámara)", 
+            variable=self.processing_mode, 
+            value="single",
+            command=self.on_mode_change,
+            bootstyle="success-toolbutton"
+        )
+        single_radio.pack(side=tk.LEFT, padx=(0, 20))
+        
+        multi_radio = ttk.Radiobutton(
+            radio_container, 
+            text="Carpeta con subcarpetas (múltiples cámaras)", 
+            variable=self.processing_mode, 
+            value="multi",
+            command=self.on_mode_change,
+            bootstyle="success-toolbutton"
+        )
+        multi_radio.pack(side=tk.LEFT, padx=(10, 20))
         
         # Selección de carpeta
-        folder_frame = ttk.LabelFrame(main_frame, text="Seleccionar Carpeta", padding="10")
+        folder_frame = ttk.LabelFrame(main_frame, text="Seleccionar Carpeta", padding="15", bootstyle="success")
         folder_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20))
         
-        # Combobox para carpetas recientes
-        ttk.Label(folder_frame, text="Carpeta:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        # Panel superior con etiqueta y botones
+        folder_header = ttk.Frame(folder_frame)
+        folder_header.pack(fill=tk.X, pady=(0, 10))
         
-        self.folder_combobox = ttk.Combobox(folder_frame, textvariable=self.selected_folder, 
-                                           values=self.folders_history, width=70)
-        self.folder_combobox.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
+        # Etiqueta con ícono
+        ttk.Label(folder_header, text="📁 Carpeta de imágenes:", 
+                 font=("Arial", 10, "bold")).pack(side=tk.LEFT)
         
-        # Botón examinar
-        browse_btn = ttk.Button(folder_frame, text="Examinar...", 
-                               command=self.browse_folder)
-        browse_btn.grid(row=1, column=1, padx=(0, 10))
+        # Botones en el lado derecho del encabezado
+        btn_frame = ttk.Frame(folder_header)
+        btn_frame.pack(side=tk.RIGHT)
+        
+        # Botón examinar con mejor estilo
+        browse_btn = ttk.Button(btn_frame, text="Examinar...", 
+                        command=self.browse_folder,
+                        bootstyle="success",
+                        width=12)
+
+        browse_btn.pack(side=tk.LEFT, padx=(0, 5))
         
         # Botón actualizar lista
-        refresh_btn = ttk.Button(folder_frame, text="↻", width=3,
-                                command=self.refresh_folder_info)
-        refresh_btn.grid(row=1, column=2)
+        refresh_btn = ttk.Button(btn_frame, text="↻ Actualizar", 
+                         command=self.refresh_folder_info,
+                         bootstyle="success-outline",
+                         width=12)
+        refresh_btn.pack(side=tk.LEFT)
         
-        # Información de la carpeta
+        # Panel para el combobox
+        combo_frame = ttk.Frame(folder_frame)
+        combo_frame.pack(fill=tk.X, padx=5)
+        
+        # Combobox para carpetas recientes con estilo mejorado
+        self.folder_combobox = ttk.Combobox(combo_frame, 
+                                    textvariable=self.selected_folder, 
+                                    values=self.folders_history, 
+                                    width=70,
+                                    bootstyle="success")
+        self.folder_combobox.pack(fill=tk.X, expand=True, pady=(0, 5))
+        
+        # Información de la carpeta con estilo mejorado
+        info_label = ttk.Label(folder_frame, text="Información de la carpeta", 
+                             font=("Arial", 10, "bold"))
+        info_label.pack(anchor=tk.W, padx=5, pady=(10, 5))
+        
+        # Usar ScrolledText de ttkbootstrap para mejor apariencia
         info_frame = ttk.Frame(folder_frame)
-        info_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
+        info_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
         
-        self.info_text = tk.Text(info_frame, height=8, width=80, wrap=tk.WORD)
-        self.info_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        # Texto con estilo mejorado
+        self.info_text = tk.Text(info_frame, height=6, width=80, wrap=tk.WORD,
+                               font=("Consolas", 9),
+                               background="#f0f0f0",
+                               borderwidth=1,
+                               relief="solid")
+        self.info_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Scrollbar para el texto
-        scrollbar = ttk.Scrollbar(info_frame, orient=tk.VERTICAL, command=self.info_text.yview)
-        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        # Scrollbar para el texto con estilo mejorado
+        scrollbar = ttk.Scrollbar(info_frame, orient=tk.VERTICAL, command=self.info_text.yview, bootstyle="round")
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.info_text.config(yscrollcommand=scrollbar.set)
         
-        info_frame.columnconfigure(0, weight=1)
-        info_frame.rowconfigure(0, weight=1)
-        
         # Configuración
-        config_frame = ttk.LabelFrame(main_frame, text="Configuración", padding="10")
+        config_frame = ttk.LabelFrame(main_frame, text="Configuración", padding="15", bootstyle="´success")
         config_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 20))
         
-        # Tamaño del damero
-        ttk.Label(config_frame, text="Tamaño del damero (esquinas interiores):").grid(row=0, column=0, sticky=tk.W)
+        # Crear dos columnas para organizar mejor los controles
+        left_config = ttk.Frame(config_frame)
+        left_config.grid(row=0, column=0, sticky=(tk.N, tk.W), padx=(5, 15), pady=10)
         
-        chess_frame = ttk.Frame(config_frame)
-        chess_frame.grid(row=0, column=1, sticky=tk.W, padx=(10, 0))
+        right_config = ttk.Frame(config_frame)
+        right_config.grid(row=0, column=1, sticky=(tk.N, tk.W), padx=(15, 5), pady=10)
+        
+        # === COLUMNA IZQUIERDA ===
+        # Tamaño del damero (en columna izquierda)
+        chess_label_frame = ttk.LabelFrame(left_config, text="Tamaño del damero", bootstyle="success")
+        chess_label_frame.pack(fill=tk.X, pady=(0, 10), ipady=5)
+        
+        chess_frame = ttk.Frame(chess_label_frame)
+        chess_frame.pack(padx=10, pady=10)
         
         self.chess_width = tk.StringVar(value=str(CHESSBOARD_SIZE[0]))
         self.chess_height = tk.StringVar(value=str(CHESSBOARD_SIZE[1]))
         
-        ttk.Entry(chess_frame, textvariable=self.chess_width, width=5).grid(row=0, column=0)
-        ttk.Label(chess_frame, text="x").grid(row=0, column=1, padx=5)
-        ttk.Entry(chess_frame, textvariable=self.chess_height, width=5).grid(row=0, column=2)
+        ttk.Label(chess_frame, text="Ancho:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        ttk.Entry(chess_frame, textvariable=self.chess_width, width=5, bootstyle="primary").grid(row=0, column=1)
         
-        # Resolución de imagen
-        ttk.Label(config_frame, text="Resolución de imagen:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
+        ttk.Label(chess_frame, text="Alto:").grid(row=0, column=2, sticky=tk.W, padx=(15, 5))
+        ttk.Entry(chess_frame, textvariable=self.chess_height, width=5, bootstyle="primary").grid(row=0, column=3)
         
-        res_frame = ttk.Frame(config_frame)
-        res_frame.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(10, 0))
+        # Resolución de imagen (en columna izquierda)
+        res_label_frame = ttk.LabelFrame(left_config, text="Resolución de imagen", bootstyle="success")
+        res_label_frame.pack(fill=tk.X, ipady=5)
+        
+        res_frame = ttk.Frame(res_label_frame)
+        res_frame.pack(padx=10, pady=10)
         
         self.img_width = tk.StringVar(value=str(IMAGE_RESOLUTION[0]))
         self.img_height = tk.StringVar(value=str(IMAGE_RESOLUTION[1]))
         
-        ttk.Entry(res_frame, textvariable=self.img_width, width=6).grid(row=0, column=0)
-        ttk.Label(res_frame, text="x").grid(row=0, column=1, padx=5)
-        ttk.Entry(res_frame, textvariable=self.img_height, width=6).grid(row=0, column=2)
+        ttk.Label(res_frame, text="Ancho:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        ttk.Entry(res_frame, textvariable=self.img_width, width=6, bootstyle="primary").grid(row=0, column=1)
         
-        # Opciones adicionales
-        options_frame = ttk.Frame(config_frame)
-        options_frame.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        ttk.Label(res_frame, text="Alto:").grid(row=0, column=2, sticky=tk.W, padx=(15, 5))
+        ttk.Entry(res_frame, textvariable=self.img_height, width=6, bootstyle="primary").grid(row=0, column=3)
         
+        # Opciones adicionales (en columna derecha)
+        options_label_frame = ttk.LabelFrame(right_config, text="Opciones adicionales", bootstyle="success")
+        options_label_frame.pack(fill=tk.X, expand=True)
+        
+        # Usar un estilo más moderno para los checkbuttons
         self.save_individual = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Guardar mapas individuales", 
-                       variable=self.save_individual).grid(row=0, column=0, sticky=tk.W)
+        save_check = ttk.Checkbutton(
+            options_label_frame, 
+            text="Guardar mapas individuales", 
+            variable=self.save_individual,
+            bootstyle="round-toggle-success"
+        )
+        save_check.pack(anchor=tk.W, padx=10, pady=(10, 5))
         
         self.show_plots = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Mostrar gráficos", 
-                       variable=self.show_plots).grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
+        plots_check = ttk.Checkbutton(
+            options_label_frame, 
+            text="Mostrar gráficos", 
+            variable=self.show_plots,
+            bootstyle="round-toggle-success"
+        )
+        plots_check.pack(anchor=tk.W, padx=10, pady=5)
         
         self.optimize_performance = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Optimizar rendimiento", 
-                       variable=self.optimize_performance).grid(row=1, column=0, sticky=tk.W, pady=(5, 0))
+        perf_check = ttk.Checkbutton(
+            options_label_frame, 
+            text="Optimizar rendimiento", 
+            variable=self.optimize_performance,
+            bootstyle="round-toggle-success"
+        )
+        perf_check.pack(anchor=tk.W, padx=10, pady=5)
         
         self.save_debug_images = tk.BooleanVar(value=False)
-        ttk.Checkbutton(options_frame, text="Guardar imágenes de depuración", 
-                       variable=self.save_debug_images).grid(row=1, column=1, sticky=tk.W, padx=(20, 0), pady=(5, 0))
+        debug_check = ttk.Checkbutton(
+            options_label_frame, 
+            text="Guardar imágenes de depuración", 
+            variable=self.save_debug_images,
+            bootstyle="round-toggle-success"
+        )
+        debug_check.pack(anchor=tk.W, padx=10, pady=(5, 10))
         
         # Control de sensibilidad de detección
-        sensitivity_frame = ttk.Frame(config_frame)
-        sensitivity_frame.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        sensitivity_frame = ttk.LabelFrame(config_frame, text="Sensibilidad de detección", bootstyle="success")
+        sensitivity_frame.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 0), padx=(0, 10))
         
-        ttk.Label(sensitivity_frame, text="Sensibilidad de detección:").grid(row=0, column=0, sticky=tk.W)
-        
+        # Valor actual
+        value_frame = ttk.Frame(sensitivity_frame)
+        value_frame.pack(fill=tk.X, padx=10, pady=(10, 0))
+        #hasta aqui he compartido.
         self.detection_sensitivity = tk.DoubleVar(value=3.0)
-        sensitivity_scale = ttk.Scale(sensitivity_frame, from_=1.0, to=5.0, 
+        
+        # Mostrar valor actual
+        self.sensitivity_value_label = ttk.Label(value_frame, text=f"{self.detection_sensitivity.get():.1f}", 
+                                               bootstyle="success", font=("Arial", 10, "bold"))
+        self.sensitivity_value_label.pack(side=tk.RIGHT)
+        
+        ttk.Label(value_frame, text="Valor actual:").pack(side=tk.RIGHT, padx=(0, 5))
+        
+        # Control deslizante mejorado
+        scale_frame = ttk.Frame(sensitivity_frame)
+        scale_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
+        
+        sensitivity_scale = ttk.Scale(scale_frame, from_=1.0, to=5.0, 
                                      variable=self.detection_sensitivity, 
-                                     orient=tk.HORIZONTAL, length=200)
-        sensitivity_scale.grid(row=0, column=1, padx=(10, 0))
+                                     orient=tk.HORIZONTAL, length=250,
+                                     bootstyle="success",
+                                     command=self.update_sensitivity_label)
+        sensitivity_scale.pack(fill=tk.X, expand=True)
         
         # Etiquetas para la escala
-        ttk.Label(sensitivity_frame, text="Baja").grid(row=1, column=1, sticky=tk.W, padx=(10, 0))
-        ttk.Label(sensitivity_frame, text="Alta").grid(row=1, column=1, sticky=tk.E)
+        label_frame = ttk.Frame(sensitivity_frame)
+        label_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        ttk.Label(label_frame, text="Baja", bootstyle="secondary").pack(side=tk.LEFT)
+        ttk.Label(label_frame, text="Alta", bootstyle="secondary").pack(side=tk.RIGHT)
+    
+    def update_sensitivity_label(self, value):
+        # Actualizar la etiqueta con el valor actual del control deslizante
+        self.sensitivity_value_label.config(text=f"{float(value):.1f}")
         
         # Botones de acción
         action_frame = ttk.Frame(main_frame)
         action_frame.grid(row=4, column=0, columnspan=3, pady=(0, 20))
         
         self.generate_btn = ttk.Button(action_frame, text="Generar Mapa(s) de Calor", 
-                                      command=self.generate_heatmap_threaded, 
-                                      style="Accent.TButton")
+                               command=self.generate_heatmap_threaded, 
+                               bootstyle="success")
+
         self.generate_btn.grid(row=0, column=0, padx=(0, 10))
         
         clear_btn = ttk.Button(action_frame, text="Limpiar Historial", 
-                              command=self.clear_history)
+                              command=self.clear_history,
+                              bootstyle="secondary",  # Botón gris para acción secundaria
+                              width=15)
         clear_btn.grid(row=0, column=1, padx=(0, 10))
         
         self.cancel_btn = ttk.Button(action_frame, text="Cancelar", 
-                                    command=self.cancel_processing, state='disabled')
+                                    command=self.cancel_processing, 
+                                    bootstyle="danger-outline",  # Botón rojo con contorno
+                                    width=15,
+                                    state='disabled')
         self.cancel_btn.grid(row=0, column=2)
         
         # Barra de progreso
@@ -1230,7 +1489,16 @@ class HeatmapApp:
             self.save_folder_history()
 
 def main():
-    root = tk.Tk()
+    # Usar ttkbootstrap en lugar de tkinter estándar
+    root = ttk.Window(
+        title="Generador de Mapa de Calor - Calibración Multi-Cámara",
+        themename="cosmo",  # Tema moderno y limpio
+        resizable=(True, True),
+        size=(1000, 800),
+        position=(100, 50),
+        minsize=(800, 600),
+        iconphoto=""
+    )
     app = HeatmapApp(root)
     root.mainloop()
 
